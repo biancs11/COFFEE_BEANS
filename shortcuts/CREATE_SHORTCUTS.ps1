@@ -35,6 +35,16 @@ function New-Shortcut {
 $shell32 = "$env:SystemRoot\System32\shell32.dll"
 $cmd     = "$env:SystemRoot\System32\cmd.exe"
 
+# ── 0. AUTO-REFRESH (GitHub + Local watch) ───────────────────
+New-Shortcut `
+    -Name        "CoffeeSort Auto-Refresh" `
+    -Target      $cmd `
+    -Arguments   "/c `"$ShortcutDir\START_AUTO.bat`"" `
+    -WorkDir     $ProjectDir `
+    -Description "Start Coffee Bean Sorting System with auto-refresh (GitHub + local watch)" `
+    -IconPath    $shell32 `
+    -IconIndex   175
+
 # ── 1. START SYSTEM ──────────────────────────────────────────
 New-Shortcut `
     -Name        "☕ Start Coffee Sorter" `
@@ -87,8 +97,11 @@ New-Shortcut `
 
 Write-Host ""
 Write-Host "======================================================"
-Write-Host "  5 shortcuts created on your Desktop!"
+Write-Host "  6 shortcuts created on your Desktop!"
 Write-Host "  Look for them on your Windows Desktop."
+Write-Host ""
+Write-Host "  NEW: 'CoffeeSort Auto-Refresh'"
+Write-Host "       Starts everything + watches GitHub & local files"
 Write-Host "======================================================"
 Write-Host ""
 Read-Host -Prompt "Press Enter to close"
