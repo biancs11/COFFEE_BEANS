@@ -1,0 +1,59 @@
+# ============================================================
+# Coffee Bean Sorting System — .gitignore
+# ============================================================
+
+# ── Secrets & Environment ─────────────────────────────────────
+.env
+# Allow the example file (no real secrets)
+!.env.example
+
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+*.so
+
+# ── Virtual Environments ──────────────────────────────────────
+venv/
+.venv/
+env/
+.env/
+ENV/
+
+# ── Database ──────────────────────────────────────────────────
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# ── Logs ──────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── Frontend Build ────────────────────────────────────────────
+frontend/dist/
+frontend/node_modules/
+
+# ── IDE & OS ──────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Alembic ───────────────────────────────────────────────────
+# Keep migration scripts, ignore generated cache
+migrations/__pycache__/
+
+# ── Misc ──────────────────────────────────────────────────────
+*.tmp
+*.bak
+*.orig

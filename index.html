@@ -1,0 +1,1238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Coffee Bean Sorting System using Color and Size Detection</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<!-- ============================================================
+     SIDEBAR
+     ============================================================ -->
+<aside class="sidebar">
+
+  <div class="sidebar-logo">
+    <div class="logo-icon">☕</div>
+    <h1>Coffee Bean Sorting System</h1>
+    <span>Color &amp; Size Detection</span>
+  </div>
+
+  <div class="sidebar-status">
+    <div class="status-dot" id="system-status-dot"></div>
+    <div class="status-info">
+      <div class="status-label">System Status</div>
+      <div class="status-value" id="system-status-val">STANDBY</div>
+    </div>
+  </div>
+
+  <nav class="nav-section">
+    <div class="nav-label">System</div>
+
+    <div class="nav-item active" data-page="page-overview">
+      <div class="nav-icon">🏠</div>
+      <div class="nav-text">
+        <div class="nav-title">Overview</div>
+        <div class="nav-sub">System Home</div>
+      </div>
+    </div>
+
+    <div class="nav-label">Features</div>
+
+    <div class="nav-item" data-page="page-detection">
+      <div class="nav-icon">📷</div>
+      <div class="nav-text">
+        <div class="nav-title">Bean Detection</div>
+        <div class="nav-sub">Image Acquisition</div>
+      </div>
+      <span class="nav-badge green" id="detection-badge" style="display:none">●</span>
+    </div>
+
+    <div class="nav-item" data-page="page-assessment">
+      <div class="nav-icon">🤖</div>
+      <div class="nav-text">
+        <div class="nav-title">Quality Assessment</div>
+        <div class="nav-sub">AI Analysis</div>
+      </div>
+    </div>
+
+    <div class="nav-item" data-page="page-sorting">
+      <div class="nav-icon">📦</div>
+      <div class="nav-text">
+        <div class="nav-title">Auto Sorting</div>
+        <div class="nav-sub">Ejection Control</div>
+      </div>
+    </div>
+
+    <div class="nav-item" data-page="page-errors">
+      <div class="nav-icon">🚨</div>
+      <div class="nav-text">
+        <div class="nav-title">Error Monitoring</div>
+        <div class="nav-sub">Alerts &amp; Events</div>
+      </div>
+      <span class="nav-badge" id="error-badge">0</span>
+    </div>
+
+    <div class="nav-item" data-page="page-dashboard">
+      <div class="nav-icon">📊</div>
+      <div class="nav-text">
+        <div class="nav-title">Dashboard</div>
+        <div class="nav-sub">Analytics &amp; Reports</div>
+      </div>
+    </div>
+
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="system-info">
+      <div class="info-row">
+        <span class="info-label">Beans Processed</span>
+        <span class="info-value" id="sidebar-processed">0</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Rate</span>
+        <span class="info-value" id="sidebar-rate">0/min</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Good Yield</span>
+        <span class="info-value text-success" id="sidebar-yield">—%</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Air Pressure</span>
+        <span class="info-value" id="sidebar-pressure">— MPa</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Uptime</span>
+        <span class="info-value font-mono" id="uptime">00:00:00</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Temp</span>
+        <span class="info-value" id="sidebar-temp">—</span>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ============================================================
+     MAIN CONTENT
+     ============================================================ -->
+<main class="main">
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="header-left">
+      <div>
+        <div class="header-title" id="header-title">Overview</div>
+        <div class="header-breadcrumb" id="header-breadcrumb">Coffee Bean Sorting System using Color and Size Detection</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="clock" id="clock">00:00:00</div>
+      <button class="header-btn" id="btn-export">⬇ Export CSV</button>
+      <button class="header-btn danger" id="btn-reset">🔄 Reset</button>
+      <button class="header-btn danger" id="btn-stop">⏹ Stop</button>
+      <button class="header-btn primary" id="btn-start">
+        ▶ <span id="btn-start-label">Start System</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ========================================================
+       PAGE: OVERVIEW
+       ======================================================== -->
+  <section class="page-content active" id="page-overview">
+
+    <div class="overview-hero">
+      <div class="hero-text">
+        <h2>Coffee Bean Sorting System</h2>
+        <p>AI-powered sorting platform integrating industrial vision inspection, automated ejection, and real-time quality monitoring for high-precision coffee bean grading by color and size.</p>
+        <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap">
+          <span class="card-badge success">✅ Vision Online</span>
+          <span class="card-badge blue">🤖 AI Active</span>
+          <span class="card-badge info">⚙️ Raspberry Pi 5</span>
+          <span class="card-badge amber">📷 5–12 MP Camera</span>
+          <span class="card-badge info">💨 0.4–0.8 MPa</span>
+        </div>
+      </div>
+      <div class="hero-stats">
+        <div class="hero-stat">
+          <div class="hero-stat-val text-success" id="dash-total">0</div>
+          <div class="hero-stat-lab">Beans Sorted</div>
+        </div>
+        <div class="hero-stat">
+          <div class="hero-stat-val text-accent" id="dash-rate">0</div>
+          <div class="hero-stat-lab">Beans/min</div>
+        </div>
+        <div class="hero-stat">
+          <div class="hero-stat-val text-primary" id="dash-good">—%</div>
+          <div class="hero-stat-lab">Good Yield</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Ticker -->
+    <div class="ticker-wrap mb-3">
+      <span class="ticker-label">LIVE</span>
+      <div class="ticker-track">
+        <div class="ticker-content">
+          ☕ System Ready &nbsp;|&nbsp; 📷 Camera: 5–12 MP @ 60–200 fps &nbsp;|&nbsp; 🔄 Conveyor: 180 RPM &nbsp;|&nbsp; 💨 Pressure: 0.4–0.8 MPa &nbsp;|&nbsp; 🎯 Target Accuracy: ≥95% &nbsp;|&nbsp; 📦 Size Grades: 8mm / 7mm / 6mm / 5mm / Defective &nbsp;|&nbsp; 🖥️ Processing: Raspberry Pi 5 / OpenCV / AI &nbsp;|&nbsp; ⚡ Power: 200–500W &nbsp;|&nbsp; 🏭 Capacity: 0.5–2.0 kg/min
+        </div>
+      </div>
+    </div>
+
+    <!-- Stat Cards Row -->
+    <div class="grid-4 mb-3">
+      <div class="stat-card blue">
+        <div class="stat-icon blue">📷</div>
+        <div class="stat-info">
+          <div class="stat-value" id="hdr-processed">0</div>
+          <div class="stat-label">Total Processed</div>
+          <div class="stat-delta up">▲ Live</div>
+        </div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-icon green">✅</div>
+        <div class="stat-info">
+          <div class="stat-value text-success" id="ov-good-count">0</div>
+          <div class="stat-label">Good Beans Sorted</div>
+          <div class="stat-delta up">≥96–98% yield target</div>
+        </div>
+      </div>
+      <div class="stat-card red">
+        <div class="stat-icon red">❌</div>
+        <div class="stat-info">
+          <div class="stat-value text-danger" id="ov-defect-count">0</div>
+          <div class="stat-label">Defects Ejected</div>
+          <div class="stat-delta down">≥95% detection rate</div>
+        </div>
+      </div>
+      <div class="stat-card amber">
+        <div class="stat-icon amber">⚡</div>
+        <div class="stat-info">
+          <div class="stat-value text-accent" id="ov-rate">0</div>
+          <div class="stat-label">Beans / Minute</div>
+          <div class="stat-delta up">50–200 beans/sec</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Features Grid -->
+    <div class="grid-2 mb-3">
+
+      <!-- Feature Overview Cards -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><div class="card-icon" style="background:rgba(37,99,235,0.15)">📷</div> Feature 1 — Bean Detection</div>
+          <span class="card-badge blue">Vision System</span>
+        </div>
+        <p style="font-size:0.75rem;color:var(--text-muted);line-height:1.6;margin-bottom:12px">
+          AI-powered bean detection accurately identifies individual coffee beans as they pass through the vision inspection zone. High-quality images captured via 5–12 MP industrial camera at 60–200 fps.
+        </p>
+        <div class="spec-grid">
+          <div class="spec-item"><span class="spec-label">Camera</span><span class="spec-value">5–12 MP GigE</span></div>
+          <div class="spec-item"><span class="spec-label">Frame Rate</span><span class="spec-value">60–200 fps</span></div>
+          <div class="spec-item"><span class="spec-label">Lens</span><span class="spec-value">C-mount 8–12mm</span></div>
+          <div class="spec-item"><span class="spec-label">Lighting</span><span class="spec-value">LED 10k–50k lux</span></div>
+        </div>
+        <button class="btn btn-primary btn-sm mt-3" onclick="navigate('page-detection')">Open Detection Panel →</button>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><div class="card-icon" style="background:rgba(16,185,129,0.15)">🤖</div> Feature 2 — Quality Assessment</div>
+          <span class="card-badge success">AI Engine</span>
+        </div>
+        <p style="font-size:0.75rem;color:var(--text-muted);line-height:1.6;margin-bottom:12px">
+          Applies AI and computer vision to evaluate captured bean images — analyzing color, size, and visible defects. Classifies each bean to predefined quality grades with ≥95% accuracy.
+        </p>
+        <div class="spec-grid">
+          <div class="spec-item"><span class="spec-label">Processor</span><span class="spec-value">Raspberry Pi 5</span></div>
+          <div class="spec-item"><span class="spec-label">Software</span><span class="spec-value">OpenCV / AI</span></div>
+          <div class="spec-item"><span class="spec-label">Accuracy</span><span class="spec-value">≥95%</span></div>
+          <div class="spec-item"><span class="spec-label">Grades</span><span class="spec-value">4+Defect</span></div>
+        </div>
+        <button class="btn btn-success btn-sm mt-3" onclick="navigate('page-assessment')">Open Assessment Panel →</button>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><div class="card-icon" style="background:rgba(245,158,11,0.15)">📦</div> Feature 3 — Automated Sorting</div>
+          <span class="card-badge warning">Ejection System</span>
+        </div>
+        <p style="font-size:0.75rem;color:var(--text-muted);line-height:1.6;margin-bottom:12px">
+          Automatically routes coffee beans into designated containers using pneumatic solenoid valves. Air nozzles fire precise 20–50ms bursts at 0.4–0.8 MPa to redirect beans with 5–10ms response time.
+        </p>
+        <div class="spec-grid">
+          <div class="spec-item"><span class="spec-label">Compressor</span><span class="spec-value">0.4–0.8 MPa</span></div>
+          <div class="spec-item"><span class="spec-label">Response</span><span class="spec-value">5–10 ms</span></div>
+          <div class="spec-item"><span class="spec-label">Air Pulse</span><span class="spec-value">20–50 ms</span></div>
+          <div class="spec-item"><span class="spec-label">Bins</span><span class="spec-value">5 Grades</span></div>
+        </div>
+        <button class="btn btn-amber btn-sm mt-3" onclick="navigate('page-sorting')">Open Sorting Panel →</button>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><div class="card-icon" style="background:rgba(239,68,68,0.15)">🚨</div> Feature 4 — Error Monitoring</div>
+          <span class="card-badge danger">Real-time Alerts</span>
+        </div>
+        <p style="font-size:0.75rem;color:var(--text-muted);line-height:1.6;margin-bottom:12px">
+          Continuously monitors sorting operations to detect incorrect sorting, missed detections, and system irregularities. Provides real-time alerts and cycle summaries for operator review.
+        </p>
+        <div class="spec-grid">
+          <div class="spec-item"><span class="spec-label">Monitoring</span><span class="spec-value">Real-time</span></div>
+          <div class="spec-item"><span class="spec-label">Alert Types</span><span class="spec-value">3 Levels</span></div>
+          <div class="spec-item"><span class="spec-label">Safety</span><span class="spec-value">E-Stop, OCP</span></div>
+          <div class="spec-item"><span class="spec-label">Interface</span><span class="spec-value">RS485 / ETH</span></div>
+        </div>
+        <button class="btn btn-danger btn-sm mt-3" onclick="navigate('page-errors')">Open Error Monitor →</button>
+      </div>
+    </div>
+
+    <!-- Hardware Specs Overview -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🏭 Hardware Specifications — Complete Parts List</div>
+        <span class="card-badge info">SUS304 Stainless Steel Frame</span>
+      </div>
+      <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:16px">
+
+        <div>
+          <div style="font-size:0.72rem; font-weight:700; color:var(--accent); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px">1. Feeding &amp; Handling</div>
+          <div class="spec-grid">
+            <div class="spec-item"><span class="spec-label">Hopper</span><span class="spec-value">10–20 kg</span></div>
+            <div class="spec-item"><span class="spec-label">Feeder Motor</span><span class="spec-value">25–60W</span></div>
+            <div class="spec-item"><span class="spec-label">Singulator</span><span class="spec-value">0.5–2 b/s</span></div>
+            <div class="spec-item"><span class="spec-label">Chute Width</span><span class="spec-value">20–40 mm</span></div>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size:0.72rem; font-weight:700; color:var(--primary-light); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px">2. Vision Inspection</div>
+          <div class="spec-grid">
+            <div class="spec-item"><span class="spec-label">Resolution</span><span class="spec-value">5–12 MP</span></div>
+            <div class="spec-item"><span class="spec-label">Frame Rate</span><span class="spec-value">60–200 fps</span></div>
+            <div class="spec-item"><span class="spec-label">LED Lux</span><span class="spec-value">10k–50k</span></div>
+            <div class="spec-item"><span class="spec-label">Color Temp</span><span class="spec-value">5500–6500K</span></div>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size:0.72rem; font-weight:700; color:var(--success); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px">3. Ejection System</div>
+          <div class="spec-grid">
+            <div class="spec-item"><span class="spec-label">Pressure</span><span class="spec-value">0.4–0.8 MPa</span></div>
+            <div class="spec-item"><span class="spec-label">Flow</span><span class="spec-value">50–100 L/min</span></div>
+            <div class="spec-item"><span class="spec-label">Response</span><span class="spec-value">5–10 ms</span></div>
+            <div class="spec-item"><span class="spec-label">Nozzle</span><span class="spec-value">Ø 1–2 mm</span></div>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size:0.72rem; font-weight:700; color:var(--info); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px">4. Control System</div>
+          <div class="spec-grid">
+            <div class="spec-item"><span class="spec-label">PLC / MCU</span><span class="spec-value">ESP32/RPi</span></div>
+            <div class="spec-item"><span class="spec-label">HMI</span><span class="spec-value">7–10" Touch</span></div>
+            <div class="spec-item"><span class="spec-label">Power</span><span class="spec-value">200–500W</span></div>
+            <div class="spec-item"><span class="spec-label">I/O</span><span class="spec-value">16+ Digital</span></div>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size:0.72rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px">5. Mechanical</div>
+          <div class="spec-grid">
+            <div class="spec-item"><span class="spec-label">Frame</span><span class="spec-value">SUS304</span></div>
+            <div class="spec-item"><span class="spec-label">Screens</span><span class="spec-value">8/7/6/5 mm</span></div>
+            <div class="spec-item"><span class="spec-label">Dimensions</span><span class="spec-value">1000×800×900</span></div>
+            <div class="spec-item"><span class="spec-label">Weight</span><span class="spec-value">80–150 kg</span></div>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size:0.72rem; font-weight:700; color:var(--warning); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px">6. Performance</div>
+          <div class="spec-grid">
+            <div class="spec-item"><span class="spec-label">Speed</span><span class="spec-value">0.5–2.0 kg/min</span></div>
+            <div class="spec-item"><span class="spec-label">Defect Det.</span><span class="spec-value">≥95%</span></div>
+            <div class="spec-item"><span class="spec-label">Yield</span><span class="spec-value">96–98%</span></div>
+            <div class="spec-item"><span class="spec-label">Noise</span><span class="spec-value">≤70 dB</span></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </section>
+
+
+  <!-- ========================================================
+       PAGE: FEATURE 1 — DETECTION
+       ======================================================== -->
+  <section class="page-content" id="page-detection">
+
+    <div class="page-header">
+      <h2>📷 Feature 1 — Coffee Bean Detection &amp; Image Acquisition</h2>
+      <p>AI-powered detection identifies individual beans as they pass through the vision zone. The 5–12 MP industrial camera captures high-quality images at 60–200 fps via USB3.0/GigE interface, illuminated by white LED ring/stripe at 10,000–50,000 lux (5500–6500K).</p>
+    </div>
+
+    <div class="grid-4 mb-3">
+      <div class="stat-card blue">
+        <div class="stat-icon blue">📷</div>
+        <div class="stat-info">
+          <div class="stat-value" id="det-count">0</div>
+          <div class="stat-label">Beans Detected</div>
+        </div>
+      </div>
+      <div class="stat-card cyan">
+        <div class="stat-icon cyan">🖼️</div>
+        <div class="stat-info">
+          <div class="stat-value" id="det-capture">0</div>
+          <div class="stat-label">Images Captured</div>
+        </div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-icon green">⚡</div>
+        <div class="stat-info">
+          <div class="stat-value" id="det-fps">0</div>
+          <div class="stat-label">FPS (Live)</div>
+        </div>
+      </div>
+      <div class="stat-card amber">
+        <div class="stat-icon amber">🔄</div>
+        <div class="stat-info">
+          <div class="stat-value" id="det-rate">0</div>
+          <div class="stat-label">Beans/min</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2 mb-3">
+
+      <!-- Camera Feed -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <div class="card-icon" style="background:rgba(239,68,68,0.15)">📹</div>
+            Live Camera Feed
+          </div>
+          <div style="display:flex; gap:8px; align-items:center">
+            <span class="hud-badge live">● REC</span>
+            <span class="hud-badge fps" id="hud-fps">60 FPS</span>
+          </div>
+        </div>
+        <div class="camera-view">
+          <canvas class="camera-canvas" id="camera-canvas"></canvas>
+          <div class="camera-overlay">
+            <div class="camera-hud">
+              <span class="hud-badge live">LIVE</span>
+              <span class="hud-badge fps">CAM-01</span>
+              <span class="hud-badge count" id="hud-count">BEANS: 0</span>
+            </div>
+          </div>
+          <div class="scan-overlay" id="scan-overlay" style="display:none"></div>
+        </div>
+        <div class="camera-controls">
+          <button class="btn btn-primary btn-sm" onclick="startSystem()">▶ Start Camera</button>
+          <button class="btn btn-ghost btn-sm">⚙ Settings</button>
+          <button class="btn btn-ghost btn-sm">📸 Snapshot</button>
+          <button class="btn btn-ghost btn-sm">🔦 LED Toggle</button>
+        </div>
+      </div>
+
+      <!-- Detection Result Panel -->
+      <div style="display:flex; flex-direction:column; gap:14px">
+
+        <!-- Latest bean -->
+        <div class="card" style="flex:1">
+          <div class="card-header">
+            <div class="card-title">
+              <div class="card-icon" style="background:rgba(16,185,129,0.15)">🔍</div>
+              Latest Detection Result
+            </div>
+            <span class="card-badge success">Real-time</span>
+          </div>
+          <div id="latest-bean-result">
+            <p class="text-muted text-xs" style="text-align:center; padding:20px">System inactive — start to begin detection</p>
+          </div>
+        </div>
+
+        <!-- Camera Specs -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📐 Vision System Specs</div>
+          </div>
+          <div class="spec-grid">
+            <div class="spec-item"><span class="spec-label">2.1 Camera Resolution</span><span class="spec-value">5–12 MP</span></div>
+            <div class="spec-item"><span class="spec-label">Frame Rate</span><span class="spec-value">60–200 fps</span></div>
+            <div class="spec-item"><span class="spec-label">Interface</span><span class="spec-value">USB3.0 / GigE</span></div>
+            <div class="spec-item"><span class="spec-label">2.2 Lens Type</span><span class="spec-value">C-mount</span></div>
+            <div class="spec-item"><span class="spec-label">Focal Length</span><span class="spec-value">8–12 mm</span></div>
+            <div class="spec-item"><span class="spec-label">Aperture</span><span class="spec-value">f/1.4–f/2.8</span></div>
+            <div class="spec-item"><span class="spec-label">2.3 LED Type</span><span class="spec-value">Ring / Stripe</span></div>
+            <div class="spec-item"><span class="spec-label">Brightness</span><span class="spec-value">10k–50k lux</span></div>
+            <div class="spec-item"><span class="spec-label">Color Temp</span><span class="spec-value">5500–6500K</span></div>
+            <div class="spec-item"><span class="spec-label">2.4 Processor</span><span class="spec-value">RPi 5 / PC</span></div>
+            <div class="spec-item"><span class="spec-label">CPU</span><span class="spec-value">Quad 2.4+ GHz</span></div>
+            <div class="spec-item"><span class="spec-label">Software</span><span class="spec-value">OpenCV / AI</span></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Recent Detections Table -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-icon" style="background:rgba(6,182,212,0.15)">📋</div>
+          Recent Bean Detections
+        </div>
+        <span class="card-badge info">Last 8 Beans</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Bean ID</th>
+              <th>Classification</th>
+              <th>Size</th>
+              <th>Color Profile</th>
+              <th>AI Confidence</th>
+              <th>Action</th>
+              <th>Timestamp</th>
+            </tr>
+          </thead>
+          <tbody id="recent-beans-tbody">
+            <tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted)">No detections yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </section>
+
+
+  <!-- ========================================================
+       PAGE: FEATURE 2 — ASSESSMENT
+       ======================================================== -->
+  <section class="page-content" id="page-assessment">
+
+    <div class="page-header">
+      <h2>🤖 Feature 2 — AI-Powered Coffee Bean Quality Assessment</h2>
+      <p>Applies AI and computer vision to evaluate bean color, size, and visible defects. The Raspberry Pi 5 with OpenCV analyzes each captured image and classifies beans into Premium, Grade A/B/C, or Defective categories with ≥95% detection accuracy.</p>
+    </div>
+
+    <div class="grid-3 mb-3">
+
+      <!-- Confidence Ring + Grade -->
+      <div class="card" style="display:flex; flex-direction:column; align-items:center; gap:16px; padding:24px">
+        <div class="card-title" style="align-self:flex-start">
+          <div class="card-icon" style="background:rgba(16,185,129,0.15)">🎯</div>
+          AI Confidence Score
+        </div>
+        <div class="quality-ring-container">
+          <div class="quality-ring">
+            <canvas id="ring-canvas" class="ring-canvas" width="120" height="120"></canvas>
+            <div class="ring-center">
+              <div class="ring-value text-success" id="ring-value">—%</div>
+              <div class="ring-sub">Confidence</div>
+            </div>
+          </div>
+        </div>
+        <div class="quality-grade-badge grade-grade-a" id="quality-grade-badge">WAITING</div>
+        <div id="ai-recommendation" style="width:100%; text-align:center">
+          <p class="text-muted text-xs">Start system to begin AI assessment</p>
+        </div>
+      </div>
+
+      <!-- Attribute Analysis -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <div class="card-icon" style="background:rgba(245,158,11,0.15)">📊</div>
+            Bean Attribute Analysis
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px; padding:10px; background:var(--bg-panel); border-radius:8px; border:1px solid var(--border)">
+          <div id="color-swatch" style="width:32px;height:32px;border-radius:6px;background:#6f4e37;border:1px solid var(--border);flex-shrink:0"></div>
+          <div>
+            <div style="font-size:0.75rem;font-weight:600" id="attr-color-val">—</div>
+            <div class="text-muted text-xs">Active Color Profile</div>
+          </div>
+        </div>
+
+        <div class="attribute-row">
+          <span class="attr-icon">🎨</span>
+          <span class="attr-label">Color Score</span>
+          <div class="attr-bar"><div class="attr-fill" id="attr-color" style="width:0%;background:linear-gradient(90deg,#f59e0b,#fbbf24)"></div></div>
+          <span class="attr-value text-accent" id="attr-color-val-num">—</span>
+        </div>
+        <div class="attribute-row">
+          <span class="attr-icon">📏</span>
+          <span class="attr-label">Size Grade</span>
+          <div class="attr-bar"><div class="attr-fill" id="attr-size" style="width:0%;background:linear-gradient(90deg,#3b82f6,#60a5fa)"></div></div>
+          <span class="attr-value text-primary" id="attr-size-val">—</span>
+        </div>
+        <div class="attribute-row">
+          <span class="attr-icon">🔍</span>
+          <span class="attr-label">Defect Score</span>
+          <div class="attr-bar"><div class="attr-fill" id="attr-defect" style="width:0%;background:linear-gradient(90deg,#10b981,#34d399)"></div></div>
+          <span class="attr-value text-success" id="attr-defect-val">—</span>
+        </div>
+        <div class="attribute-row">
+          <span class="attr-icon">⬡</span>
+          <span class="attr-label">Uniformity</span>
+          <div class="attr-bar"><div class="attr-fill" id="attr-uniformity" style="width:0%;background:linear-gradient(90deg,#8b5cf6,#a78bfa)"></div></div>
+          <span class="attr-value" id="attr-uniformity-val">—</span>
+        </div>
+        <div class="attribute-row">
+          <span class="attr-icon">💧</span>
+          <span class="attr-label">Moisture Index</span>
+          <div class="attr-bar"><div class="attr-fill" id="attr-moisture" style="width:0%;background:linear-gradient(90deg,#06b6d4,#67e8f9)"></div></div>
+          <span class="attr-value text-info" id="attr-moisture-val">—</span>
+        </div>
+      </div>
+
+      <!-- Grade Reference + History -->
+      <div style="display:flex; flex-direction:column; gap:14px">
+
+        <div class="card" style="flex:0">
+          <div class="card-header">
+            <div class="card-title">📖 Grade Reference</div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px">
+            <div style="display:flex; align-items:center; gap:10px; font-size:0.75rem">
+              <span style="width:14px;height:14px;border-radius:3px;background:#10b981;flex-shrink:0;border:1px solid rgba(16,185,129,0.4)"></span>
+              <span style="flex:1;font-weight:600;color:var(--success)">PREMIUM</span>
+              <span class="text-muted">8mm+ · Uniform color · Zero defects</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; font-size:0.75rem">
+              <span style="width:14px;height:14px;border-radius:3px;background:#3b82f6;flex-shrink:0;border:1px solid rgba(59,130,246,0.4)"></span>
+              <span style="flex:1;font-weight:600;color:var(--primary-light)">GRADE A</span>
+              <span class="text-muted">7mm · Good color · Minor tolerance</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; font-size:0.75rem">
+              <span style="width:14px;height:14px;border-radius:3px;background:#f59e0b;flex-shrink:0;border:1px solid rgba(245,158,11,0.4)"></span>
+              <span style="flex:1;font-weight:600;color:var(--warning)">GRADE B</span>
+              <span class="text-muted">6mm · Acceptable · Standard use</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; font-size:0.75rem">
+              <span style="width:14px;height:14px;border-radius:3px;background:#8b5cf6;flex-shrink:0;border:1px solid rgba(139,92,246,0.4)"></span>
+              <span style="flex:1;font-weight:600;color:#a78bfa">GRADE C</span>
+              <span class="text-muted">5mm · Industrial/blend grade</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; font-size:0.75rem">
+              <span style="width:14px;height:14px;border-radius:3px;background:#ef4444;flex-shrink:0;border:1px solid rgba(239,68,68,0.4)"></span>
+              <span style="flex:1;font-weight:600;color:var(--danger)">DEFECTIVE</span>
+              <span class="text-muted">Black/broken/insect/mold defects</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="flex:1; overflow:hidden">
+          <div class="card-header">
+            <div class="card-title">🕐 Assessment History</div>
+            <span class="card-badge info">Last 8</span>
+          </div>
+          <div id="assessment-history">
+            <p class="text-muted text-xs" style="padding:10px 0">No history yet</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- AI Performance Stats -->
+    <div class="grid-4">
+      <div class="stat-card green">
+        <div class="stat-icon green">🎯</div>
+        <div class="stat-info">
+          <div class="stat-value">≥95%</div>
+          <div class="stat-label">Detection Accuracy Target</div>
+        </div>
+      </div>
+      <div class="stat-card blue">
+        <div class="stat-icon blue">⚡</div>
+        <div class="stat-info">
+          <div class="stat-value">≤10ms</div>
+          <div class="stat-label">AI Processing Time</div>
+        </div>
+      </div>
+      <div class="stat-card amber">
+        <div class="stat-icon amber">🏷️</div>
+        <div class="stat-info">
+          <div class="stat-value">5</div>
+          <div class="stat-label">Quality Grade Levels</div>
+        </div>
+      </div>
+      <div class="stat-card cyan">
+        <div class="stat-icon cyan">🔬</div>
+        <div class="stat-info">
+          <div class="stat-value">±0.1mm</div>
+          <div class="stat-label">Size Measurement Precision</div>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+
+  <!-- ========================================================
+       PAGE: FEATURE 3 — SORTING
+       ======================================================== -->
+  <section class="page-content" id="page-sorting">
+
+    <div class="page-header">
+      <h2>📦 Feature 3 — Automated Sorting &amp; Recommendation</h2>
+      <p>Automatically directs beans into designated containers using pneumatic ejection. Solenoid valves (24V DC, 2/2-way) fire air nozzles at 0.4–0.8 MPa with 5–10ms response time and 20–50ms air pulse to sort into 5 grade bins.</p>
+    </div>
+
+    <div class="grid-5 mb-3">
+      <div class="stat-card red">
+        <div class="stat-icon red">❌</div>
+        <div class="stat-info"><div class="stat-value text-danger" id="bin-count-defect">0</div><div class="stat-label">Defective Ejected</div></div>
+      </div>
+      <div class="stat-card blue">
+        <div class="stat-icon blue">🔵</div>
+        <div class="stat-info"><div class="stat-value" id="bin-count-large">0</div><div class="stat-label">8mm Large</div></div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-icon green">🟢</div>
+        <div class="stat-info"><div class="stat-value text-success" id="bin-count-medium">0</div><div class="stat-label">7mm Medium</div></div>
+      </div>
+      <div class="stat-card amber">
+        <div class="stat-icon amber">🟡</div>
+        <div class="stat-info"><div class="stat-value text-accent" id="bin-count-small">0</div><div class="stat-label">6mm Small</div></div>
+      </div>
+      <div class="stat-card purple">
+        <div class="stat-icon purple">🟣</div>
+        <div class="stat-info"><div class="stat-value" style="color:#a78bfa" id="bin-count-fine">0</div><div class="stat-label">5mm Fine</div></div>
+      </div>
+    </div>
+
+    <!-- Conveyor Animation -->
+    <div class="card mb-3">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-icon" style="background:rgba(245,158,11,0.15)">🔄</div>
+          Live Conveyor Feed
+        </div>
+        <div style="display:flex; gap:8px; align-items:center">
+          <div class="toggle-wrap">
+            <div class="toggle on" id="toggle-autosort"></div>
+            <span class="toggle-label">Auto-Sort</span>
+          </div>
+          <span class="card-badge warning">Pneumatic Ejection Active</span>
+        </div>
+      </div>
+      <div class="conveyor-container">
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:8px; display:flex; justify-content:space-between">
+          <span>⬅ Hopper / Singulator</span>
+          <span>Vision Zone 📷</span>
+          <span>Ejection Zone 💨 ➡</span>
+        </div>
+        <div class="conveyor-track" id="conveyor-track">
+          <div class="conveyor-belt"></div>
+        </div>
+        <div class="bin-grid">
+          <div class="sort-bin" id="bin-defect">
+            <div class="bin-icon">❌</div>
+            <div class="bin-label">Defective</div>
+            <div class="bin-count text-danger" id="bin-count-def2">0</div>
+            <div class="bin-sub" id="bin-pct-defect">0%</div>
+            <div class="bin-fill-bar" style="background:var(--danger);opacity:0.4"></div>
+          </div>
+          <div class="sort-bin" id="bin-large">
+            <div class="bin-icon">🟤</div>
+            <div class="bin-label">8mm Large</div>
+            <div class="bin-count" style="color:var(--grade-large)" id="bin-count-lg2">0</div>
+            <div class="bin-sub" id="bin-pct-large">0%</div>
+            <div class="bin-fill-bar" style="background:var(--grade-large);opacity:0.4"></div>
+          </div>
+          <div class="sort-bin" id="bin-medium">
+            <div class="bin-icon">🟫</div>
+            <div class="bin-label">7mm Medium</div>
+            <div class="bin-count text-success" id="bin-count-md2">0</div>
+            <div class="bin-sub" id="bin-pct-medium">0%</div>
+            <div class="bin-fill-bar" style="background:var(--grade-medium);opacity:0.4"></div>
+          </div>
+          <div class="sort-bin" id="bin-small">
+            <div class="bin-icon">🟡</div>
+            <div class="bin-label">6mm Small</div>
+            <div class="bin-count text-accent" id="bin-count-sm2">0</div>
+            <div class="bin-sub" id="bin-pct-small">0%</div>
+            <div class="bin-fill-bar" style="background:var(--grade-small);opacity:0.4"></div>
+          </div>
+          <div class="sort-bin" id="bin-fine">
+            <div class="bin-icon">⚪</div>
+            <div class="bin-label">5mm Fine</div>
+            <div class="bin-count" style="color:var(--grade-fine)" id="bin-count-fn2">0</div>
+            <div class="bin-sub" id="bin-pct-fine">0%</div>
+            <div class="bin-fill-bar" style="background:var(--grade-fine);opacity:0.4"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2 mb-3">
+
+      <!-- Sort Distribution Table -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📊 Sort Distribution</div>
+          <span class="card-badge blue">All Grades</span>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr><th>Icon</th><th>Grade</th><th>Quality</th><th>Count</th><th>Distribution</th><th>Status</th></tr>
+          </thead>
+          <tbody id="sorting-table-tbody">
+            <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted)">No data yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Ejector Performance -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">💨 Ejection System Performance</div>
+          <span class="card-badge success">Online</span>
+        </div>
+        <div class="attribute-row">
+          <span class="attr-icon">⚡</span>
+          <span class="attr-label">Good Yield</span>
+          <div class="attr-bar" style="width:120px"><div class="progress-track" style="margin:0;height:6px"><div class="progress-fill green" id="yield-bar" style="width:0%"></div></div></div>
+          <span class="attr-value text-success" id="good-yield">—%</span>
+        </div>
+        <div class="attribute-row">
+          <span class="attr-icon">❌</span>
+          <span class="attr-label">Ejection Rate</span>
+          <span class="attr-value text-danger" id="ejection-rate">0%</span>
+        </div>
+        <div class="attribute-row">
+          <span class="attr-icon">🔧</span>
+          <span class="attr-label">Total Ejected</span>
+          <span class="attr-value" id="total-ejected">0</span>
+        </div>
+        <div class="attribute-row">
+          <span class="attr-icon">💨</span>
+          <span class="attr-label">Valve Fires</span>
+          <span class="attr-value" id="valve-fires">0</span>
+        </div>
+
+        <div class="divider"></div>
+        <div style="font-size:0.72rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px">3. Ejection Specs</div>
+        <div class="spec-grid">
+          <div class="spec-item"><span class="spec-label">3.1 Air Compressor</span><span class="spec-value">0.4–0.8 MPa</span></div>
+          <div class="spec-item"><span class="spec-label">Flow Rate</span><span class="spec-value">50–100 L/min</span></div>
+          <div class="spec-item"><span class="spec-label">Tank</span><span class="spec-value">20–50 L</span></div>
+          <div class="spec-item"><span class="spec-label">3.2 Solenoid</span><span class="spec-value">2/2-way NO</span></div>
+          <div class="spec-item"><span class="spec-label">Response</span><span class="spec-value">5–10 ms</span></div>
+          <div class="spec-item"><span class="spec-label">Voltage</span><span class="spec-value">24V DC</span></div>
+          <div class="spec-item"><span class="spec-label">3.3 Nozzle Type</span><span class="spec-value">Flat/Round Jet</span></div>
+          <div class="spec-item"><span class="spec-label">Air Pulse</span><span class="spec-value">20–50 ms</span></div>
+        </div>
+
+        <div class="divider"></div>
+        <div style="font-size:0.72rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px">Speed Control</div>
+        <div style="display:flex; flex-direction:column; gap:10px">
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem; color:var(--text-muted); margin-bottom:6px">
+              <span>Conveyor Speed</span><span id="speed-val">180 RPM</span>
+            </div>
+            <input type="range" id="speed-slider" min="50" max="300" value="180" style="width:100%;accent-color:var(--primary)" />
+          </div>
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem; color:var(--text-muted); margin-bottom:6px">
+              <span>Detection Sensitivity</span><span id="sensitivity-val">95%</span>
+            </div>
+            <input type="range" id="sensitivity-slider" min="70" max="100" value="95" style="width:100%;accent-color:var(--success)" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+
+  <!-- ========================================================
+       PAGE: FEATURE 4 — ERROR MONITORING
+       ======================================================== -->
+  <section class="page-content" id="page-errors">
+
+    <div class="page-header">
+      <h2>🚨 Feature 4 — Sorting Error Monitoring</h2>
+      <p>Continuously monitors sorting operations to detect incorrect sorting, missed detections, and system irregularities in real time. Generates alerts and sorting cycle summaries for operator review and immediate corrective action.</p>
+    </div>
+
+    <div class="grid-4 mb-3">
+      <div class="stat-card red">
+        <div class="stat-icon red">🚨</div>
+        <div class="stat-info">
+          <div class="stat-value text-danger" id="active-criticals">0</div>
+          <div class="stat-label">Active Critical Alerts</div>
+        </div>
+      </div>
+      <div class="stat-card amber">
+        <div class="stat-icon amber">⚠️</div>
+        <div class="stat-info">
+          <div class="stat-value text-accent" id="active-warnings">0</div>
+          <div class="stat-label">Active Warnings</div>
+        </div>
+      </div>
+      <div class="stat-card cyan">
+        <div class="stat-icon cyan">📋</div>
+        <div class="stat-info">
+          <div class="stat-value" id="total-errors">0</div>
+          <div class="stat-label">Total Events Logged</div>
+        </div>
+      </div>
+      <div class="stat-card blue">
+        <div class="stat-icon blue">📊</div>
+        <div class="stat-info">
+          <div class="stat-value" id="error-rate-val">0%</div>
+          <div class="stat-label">Defect Rate</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2 mb-3">
+
+      <!-- Alert Feed -->
+      <div class="card" style="grid-column:span 1">
+        <div class="card-header">
+          <div class="card-title">
+            <div class="card-icon" style="background:rgba(239,68,68,0.15)">🚨</div>
+            Live Alert Feed
+          </div>
+          <div style="display:flex; gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="updateErrorUI()">🔄 Refresh</button>
+            <button class="btn btn-ghost btn-sm" onclick="State.errorLog.forEach(e=>e.resolved=true); updateErrorUI(); showToast('All alerts resolved','success')">✔ Resolve All</button>
+          </div>
+        </div>
+        <div class="alert-list" id="alert-list">
+          <p class="text-muted text-xs" style="text-align:center;padding:20px">No alerts recorded</p>
+        </div>
+      </div>
+
+      <!-- Error Timeline + Stats -->
+      <div style="display:flex; flex-direction:column; gap:14px">
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📈 Event Timeline</div>
+            <span class="card-badge info">Last 20 Events</span>
+          </div>
+          <div id="error-timeline-chart">
+            <p class="text-muted text-xs" style="text-align:center;padding:20px">Monitoring active — no events</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">⚙️ Safety Features</div>
+            <span class="card-badge success">All Active</span>
+          </div>
+          <div class="spec-grid">
+            <div class="spec-item"><span class="spec-label">4.3 Emergency Stop</span><span class="spec-value text-danger">Armed</span></div>
+            <div class="spec-item"><span class="spec-label">Overcurrent Prot.</span><span class="spec-value text-success">Active</span></div>
+            <div class="spec-item"><span class="spec-label">Air Pressure Mon.</span><span class="spec-value text-success">Online</span></div>
+            <div class="spec-item"><span class="spec-label">Jam Detection</span><span class="spec-value text-success">Online</span></div>
+            <div class="spec-item"><span class="spec-label">4.1 PLC Interface</span><span class="spec-value">RS485/ETH</span></div>
+            <div class="spec-item"><span class="spec-label">HMI Touch</span><span class="spec-value">7–10 inch</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📊 Cycle Summary</div>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px">
+            <div style="background:var(--bg-panel);padding:12px;border-radius:8px;border:1px solid var(--border);text-align:center">
+              <div style="font-size:1.2rem;font-weight:800;font-family:monospace;color:var(--success)" id="cycle-processed">0</div>
+              <div class="text-muted text-xs">Beans Processed</div>
+            </div>
+            <div style="background:var(--bg-panel);padding:12px;border-radius:8px;border:1px solid var(--border);text-align:center">
+              <div style="font-size:1.2rem;font-weight:800;font-family:monospace;color:var(--danger)" id="cycle-defects">0</div>
+              <div class="text-muted text-xs">Defects Found</div>
+            </div>
+            <div style="background:var(--bg-panel);padding:12px;border-radius:8px;border:1px solid var(--border);text-align:center">
+              <div style="font-size:1.2rem;font-weight:800;font-family:monospace;color:var(--warning)" id="cycle-alerts">0</div>
+              <div class="text-muted text-xs">Alerts Fired</div>
+            </div>
+            <div style="background:var(--bg-panel);padding:12px;border-radius:8px;border:1px solid var(--border);text-align:center">
+              <div style="font-size:1.2rem;font-weight:800;font-family:monospace;color:var(--primary-light)" id="cycle-uptime">00:00</div>
+              <div class="text-muted text-xs">Session Uptime</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </section>
+
+
+  <!-- ========================================================
+       PAGE: FEATURE 5 — DASHBOARD
+       ======================================================== -->
+  <section class="page-content" id="page-dashboard">
+
+    <div class="page-header">
+      <h2>📊 Feature 5 — Quality Monitoring &amp; Decision Support Dashboard</h2>
+      <p>Centralized dashboard displaying sorting statistics, quality distribution, error reports, and system performance. Enables operators to monitor efficiency, evaluate quality consistency, and make data-driven decisions.</p>
+    </div>
+
+    <!-- Hero Stats Row -->
+    <div class="grid-4 mb-3">
+      <div class="stat-card blue">
+        <div class="stat-icon blue">📦</div>
+        <div class="stat-info">
+          <div class="stat-value" id="perf-processed">0</div>
+          <div class="stat-label">Total Beans Processed</div>
+          <div class="stat-delta up">▲ Live</div>
+        </div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-icon green">🏆</div>
+        <div class="stat-info">
+          <div class="stat-value text-success" id="perf-yield">—%</div>
+          <div class="stat-label">Good Yield</div>
+          <div class="stat-delta up">Target: 96–98%</div>
+        </div>
+      </div>
+      <div class="stat-card amber">
+        <div class="stat-icon amber">⚡</div>
+        <div class="stat-info">
+          <div class="stat-value text-accent" id="perf-throughput">0 b/min</div>
+          <div class="stat-label">Processing Throughput</div>
+          <div class="stat-delta up">0.5–2.0 kg/min</div>
+        </div>
+      </div>
+      <div class="stat-card cyan">
+        <div class="stat-icon cyan">🎯</div>
+        <div class="stat-info">
+          <div class="stat-value text-info" id="perf-accuracy">—%</div>
+          <div class="stat-label">Detection Accuracy</div>
+          <div class="stat-delta up">Target: ≥95%</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2 mb-3">
+
+      <!-- Main Trend Chart -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <div class="card-icon" style="background:rgba(16,185,129,0.15)">📈</div>
+            Quality &amp; Error Rate Trend
+          </div>
+          <div style="display:flex; gap:12px; font-size:0.68rem">
+            <span style="color:var(--success)">— Good Quality %</span>
+            <span style="color:rgba(239,68,68,0.7)">--- Defect Rate %</span>
+          </div>
+        </div>
+        <div class="chart-container">
+          <canvas id="main-throughput-chart" style="width:100%;height:160px"></canvas>
+        </div>
+      </div>
+
+      <!-- Donut + Grade Bars -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <div class="card-icon" style="background:rgba(245,158,11,0.15)">🍩</div>
+            Grade Distribution
+          </div>
+          <span class="card-badge amber">Real-time</span>
+        </div>
+        <div style="display:flex; gap:20px; align-items:center">
+          <canvas id="donut-chart" width="160" height="160" style="flex-shrink:0"></canvas>
+          <div class="size-grade-bars" style="flex:1">
+            <div class="grade-row">
+              <div class="grade-dot" style="background:#ef4444"></div>
+              <span class="grade-name">Defective</span>
+              <div class="grade-bar-wrap"><div class="grade-bar-fill" id="dash-grade-defect" style="background:#ef4444;width:0%"></div></div>
+              <span class="grade-pct text-danger" id="dash-pct-defect">0%</span>
+              <span class="grade-cnt" id="dash-cnt-defect">0</span>
+            </div>
+            <div class="grade-row">
+              <div class="grade-dot" style="background:#3b82f6"></div>
+              <span class="grade-name">8mm Large</span>
+              <div class="grade-bar-wrap"><div class="grade-bar-fill" id="dash-grade-large" style="background:#3b82f6;width:0%"></div></div>
+              <span class="grade-pct" style="color:#3b82f6" id="dash-pct-large">0%</span>
+              <span class="grade-cnt" id="dash-cnt-large">0</span>
+            </div>
+            <div class="grade-row">
+              <div class="grade-dot" style="background:#10b981"></div>
+              <span class="grade-name">7mm Medium</span>
+              <div class="grade-bar-wrap"><div class="grade-bar-fill" id="dash-grade-medium" style="background:#10b981;width:0%"></div></div>
+              <span class="grade-pct text-success" id="dash-pct-medium">0%</span>
+              <span class="grade-cnt" id="dash-cnt-medium">0</span>
+            </div>
+            <div class="grade-row">
+              <div class="grade-dot" style="background:#f59e0b"></div>
+              <span class="grade-name">6mm Small</span>
+              <div class="grade-bar-wrap"><div class="grade-bar-fill" id="dash-grade-small" style="background:#f59e0b;width:0%"></div></div>
+              <span class="grade-pct text-accent" id="dash-pct-small">0%</span>
+              <span class="grade-cnt" id="dash-cnt-small">0</span>
+            </div>
+            <div class="grade-row">
+              <div class="grade-dot" style="background:#8b5cf6"></div>
+              <span class="grade-name">5mm Fine</span>
+              <div class="grade-bar-wrap"><div class="grade-bar-fill" id="dash-grade-fine" style="background:#8b5cf6;width:0%"></div></div>
+              <span class="grade-pct" style="color:#8b5cf6" id="dash-pct-fine">0%</span>
+              <span class="grade-cnt" id="dash-cnt-fine">0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="grid-2 mb-3">
+
+      <!-- System Health -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <div class="card-icon" style="background:rgba(16,185,129,0.15)">💚</div>
+            System Health Monitor
+          </div>
+          <span class="card-badge success">All Systems</span>
+        </div>
+        <div class="health-grid" id="health-panel">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- Performance KPIs -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <div class="card-icon" style="background:rgba(6,182,212,0.15)">📋</div>
+            Performance KPIs
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="exportCSV()">⬇ Export</button>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:14px">
+
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:4px">
+              <span class="text-muted">Detection Accuracy</span>
+              <span class="text-success font-bold" id="kpi-accuracy">—%</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill green" id="kpi-acc-bar" style="width:0%"></div></div>
+          </div>
+
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:4px">
+              <span class="text-muted">Good Bean Yield</span>
+              <span class="text-success font-bold" id="kpi-yield2">—%</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill green" id="kpi-yield-bar" style="width:0%"></div></div>
+          </div>
+
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:4px">
+              <span class="text-muted">System Throughput Utilization</span>
+              <span class="text-accent font-bold" id="kpi-util">—%</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill amber" id="kpi-util-bar" style="width:0%"></div></div>
+          </div>
+
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:0.72rem; margin-bottom:4px">
+              <span class="text-muted">Ejection Accuracy</span>
+              <span class="font-bold" style="color:var(--info)" id="kpi-eject">—%</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill cyan" id="kpi-eject-bar" style="width:0%"></div></div>
+          </div>
+
+          <div class="divider"></div>
+          <div class="spec-grid">
+            <div class="spec-item"><span class="spec-label">Session Uptime</span><span class="spec-value" id="perf-uptime">0h 0m</span></div>
+            <div class="spec-item"><span class="spec-label">Defects Removed</span><span class="spec-value text-danger" id="perf-defects">0</span></div>
+            <div class="spec-item"><span class="spec-label">Processing Speed</span><span class="spec-value">0.5–2.0 kg/min</span></div>
+            <div class="spec-item"><span class="spec-label">Size Precision</span><span class="spec-value">±0.1 mm</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Decision Support -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-icon" style="background:rgba(245,158,11,0.15)">💡</div>
+          Decision Support Recommendations
+        </div>
+        <span class="card-badge amber">AI-Assisted</span>
+      </div>
+      <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:14px">
+        <div style="background:var(--bg-panel);border:1px solid rgba(16,185,129,0.2);border-radius:10px;padding:16px">
+          <div style="font-size:18px;margin-bottom:8px">✅</div>
+          <div style="font-size:0.78rem;font-weight:700;color:var(--success);margin-bottom:6px">Quality On Track</div>
+          <div class="text-muted text-xs" style="line-height:1.5">Current good-yield ratio is within the 96–98% target. Continue current sorting parameters.</div>
+        </div>
+        <div style="background:var(--bg-panel);border:1px solid rgba(245,158,11,0.2);border-radius:10px;padding:16px">
+          <div style="font-size:18px;margin-bottom:8px">🔧</div>
+          <div style="font-size:0.78rem;font-weight:700;color:var(--warning);margin-bottom:6px">Monitor Pressure</div>
+          <div class="text-muted text-xs" style="line-height:1.5">Air compressor pressure should remain between 0.4–0.8 MPa. Check readings every 30 minutes.</div>
+        </div>
+        <div style="background:var(--bg-panel);border:1px solid rgba(6,182,212,0.2);border-radius:10px;padding:16px">
+          <div style="font-size:18px;margin-bottom:8px">📷</div>
+          <div style="font-size:0.78rem;font-weight:700;color:var(--info);margin-bottom:6px">Camera Calibration</div>
+          <div class="text-muted text-xs" style="line-height:1.5">Perform white-balance calibration after every 2-hour session or when lighting conditions change.</div>
+        </div>
+        <div style="background:var(--bg-panel);border:1px solid rgba(139,92,246,0.2);border-radius:10px;padding:16px">
+          <div style="font-size:18px;margin-bottom:8px">📊</div>
+          <div style="font-size:0.78rem;font-weight:700;color:#a78bfa;margin-bottom:6px">Export Reports</div>
+          <div class="text-muted text-xs" style="line-height:1.5">Export session CSV reports for quality traceability and compliance documentation.</div>
+          <button class="btn btn-ghost btn-sm mt-2" onclick="exportCSV()" style="font-size:0.65rem;padding:4px 10px">Export Now</button>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+</main>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<script src="js/app.js"></script>
+<script>
+  // Patch missing ID bindings for dual-display elements
+  const _orig_updateSortingUI = updateSortingUI;
+
+  // Sync cycle summary on page-errors
+  setInterval(() => {
+    const t = State.beansProcessed;
+    const d = State.sortCounts.defect;
+    const a = State.errorCount;
+    const s = Math.floor((Date.now() - State.sessionStart) / 1000);
+    const pad = n => String(n).padStart(2, '0');
+    const ot = el => document.getElementById(el);
+    if(ot('cycle-processed')) ot('cycle-processed').textContent = t;
+    if(ot('cycle-defects'))   ot('cycle-defects').textContent   = d;
+    if(ot('cycle-alerts'))    ot('cycle-alerts').textContent    = a;
+    if(ot('cycle-uptime'))    ot('cycle-uptime').textContent    = `${pad(Math.floor(s/60))}:${pad(s%60)}`;
+    if(ot('ov-good-count'))   ot('ov-good-count').textContent   = t - d;
+    if(ot('ov-defect-count')) ot('ov-defect-count').textContent = d;
+    if(ot('ov-rate'))         ot('ov-rate').textContent         = State.running ? fmt(t / Math.max(0.01,(Date.now()-State.sessionStart)/60000),0) : '0';
+
+    // KPI bars (page-dashboard)
+    const acc  = State.running ? parseFloat((Math.random()*(99-94)+94).toFixed(1)) : 0;
+    const yld  = t > 0 ? ((t-d)/t*100) : 0;
+    const util = t > 0 ? Math.min(100, t / Math.max(0.01,(Date.now()-State.sessionStart)/60000) / 2 * 100) : 0;
+    const ejt  = d > 0 ? Math.min(100, 94 + Math.random()*5) : 0;
+    if(ot('kpi-accuracy'))  { ot('kpi-accuracy').textContent  = acc.toFixed(1) + '%';  ot('kpi-acc-bar').style.width  = acc + '%'; }
+    if(ot('kpi-yield2'))    { ot('kpi-yield2').textContent    = yld.toFixed(1) + '%';  ot('kpi-yield-bar').style.width= yld + '%'; }
+    if(ot('kpi-util'))      { ot('kpi-util').textContent      = util.toFixed(1) + '%'; ot('kpi-util-bar').style.width = util + '%'; }
+    if(ot('kpi-eject'))     { ot('kpi-eject').textContent     = ejt.toFixed(1) + '%';  ot('kpi-eject-bar').style.width= ejt + '%'; }
+  }, 1500);
+</script>
+</body>
+</html>

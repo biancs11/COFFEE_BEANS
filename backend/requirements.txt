@@ -1,0 +1,38 @@
+# ============================================================
+# Coffee Bean Sorting System — Python Dependencies
+# All versions pinned for reproducible production deployments.
+# Install: pip install -r requirements.txt
+# ============================================================
+
+# ── Web framework ─────────────────────────────────────────────
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+gunicorn==22.0.0
+python-multipart==0.0.9
+starlette==0.37.2
+
+# ── Data validation ───────────────────────────────────────────
+pydantic==2.7.1
+pydantic-settings==2.3.1
+
+# ── Environment / config ──────────────────────────────────────
+python-dotenv==1.0.1
+
+# ── Computer vision ───────────────────────────────────────────
+opencv-python-headless==4.9.0.80
+numpy==1.26.4
+
+# ── WebSocket ─────────────────────────────────────────────────
+websockets==12.0
+
+# ── Database ──────────────────────────────────────────────────
+sqlalchemy==2.0.30
+alembic==1.13.1
+
+# ── System monitoring ─────────────────────────────────────────
+psutil==5.9.8
+
+# ── Raspberry Pi hardware (install manually — not on all archs)
+# sudo apt install python3-picamera2 libcamera-apps
+# pip install RPi.GPIO==0.7.1
+# pip install smbus2==0.4.3

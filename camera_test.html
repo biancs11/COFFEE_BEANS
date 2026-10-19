@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Camera Test — Coffee Bean Sorter</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: #111;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+      gap: 16px;
+    }
+
+    h1 { font-size: 1.2rem; color: #f5a623; text-align: center; }
+
+    /* ── IP config box ──────────────────────────────────────────── */
+    #config {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      max-width: 520px;
+    }
+
+    #config input {
+      flex: 1 1 180px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid #444;
+      background: #222;
+      color: #fff;
+      font-size: 1rem;
+    }
+
+    button {
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.95rem;
+      font-weight: 600;
+      transition: opacity 0.15s;
+    }
+    button:active { opacity: 0.7; }
+
+    #btn-connect  { background: #2ecc71; color: #111; }
+    #btn-snapshot { background: #3498db; color: #fff; }
+    #btn-snapshot:disabled { background: #444; color: #888; cursor: not-allowed; }
+
+    /* ── Status badge ───────────────────────────────────────────── */
+    #status {
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      background: #333;
+    }
+    #status.ok    { background: #1a4f2a; color: #2ecc71; }
+    #status.error { background: #4f1a1a; color: #e74c3c; }
+
+    /* ── Camera display ─────────────────────────────────────────── */
+    #camera-wrap {
+      width: 100%;
+      max-width: 640px;
+      background: #1a1a1a;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid #333;
+      aspect-ratio: 4/3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    #camera-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    #placeholder {
+      color: #555;
+      font-size: 0.9rem;
+      text-align: center;
+      padding: 16px;
+    }
+
+    /* ── Metrics row ────────────────────────────────────────────── */
+    #metrics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      width: 100%;
+      max-width: 640px;
+    }
+
+    .metric {
+      flex: 1 1 120px;
+      background: #1e1e1e;
+      border-radius: 10px;
+      padding: 10px 14px;
+      text-align: center;
+    }
+    .metric .label { font-size: 0.72rem; color: #888; text-transform: uppercase; }
+    .metric .value { font-size: 1.4rem; font-weight: 700; color: #f5a623; }
+
+    /* ── Log ────────────────────────────────────────────────────── */
+    #log {
+      width: 100%;
+      max-width: 640px;
+      background: #1a1a1a;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 0.78rem;
+      color: #aaa;
+      max-height: 160px;
+      overflow-y: auto;
+      font-family: monospace;
+    }
+    #log .entry { border-bottom: 1px solid #222; padding: 3px 0; }
+    #log .entry.err { color: #e74c3c; }
+    #log .entry.ok  { color: #2ecc71; }
+  </style>
+</head>
+<body>
+
+  <h1>📷 Coffee Bean Sorter — Camera Test</h1>
+
+  <!-- IP / port config -->
+  <div id="config">
+    <input id="ip-input" type="text" placeholder="e.g. 192.168.1.42"
+           value="" inputmode="decimal" />
+    <input id="port-input" type="number" placeholder="Port" value="8000"
+           style="max-width:90px" />
+    <button id="btn-connect" onclick="connect()">Connect</button>
+  </div>
+
+  <div id="status">● Not connected</div>
+
+  <!-- Live MJPEG stream -->
+  <div id="camera-wrap">
+    <div id="placeholder">
+      Enter the Pi's IP address above and tap <strong>Connect</strong>
+    </div>
+  </div>
+
+  <!-- Buttons -->
+  <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center">
+    <button id="btn-snapshot" disabled onclick="takeSnapshot()">📸 Snapshot</button>
+    <button style="background:#e67e22;color:#fff;" onclick="checkHealth()">🔍 Health Check</button>
+  </div>
+
+  <!-- Metrics -->
+  <div id="metrics">
+    <div class="metric"><div class="label">Camera FPS</div><div class="value" id="m-fps">—</div></div>
+    <div class="metric"><div class="label">Status</div><div class="value" id="m-status">—</div></div>
+    <div class="metric"><div class="label">CPU Temp</div><div class="value" id="m-temp">—</div></div>
+    <div class="metric"><div class="label">Uptime</div><div class="value" id="m-uptime">—</div></div>
+  </div>
+
+  <!-- Event log -->
+  <div id="log"><div class="entry">Waiting for connection…</div></div>
+
+<script>
+  let baseUrl  = "";
+  let streamEl = null;
+  let healthInterval = null;
+
+  // ── Persist last-used IP ────────────────────────────────────────
+  const savedIp = localStorage.getItem("sorter_ip");
+  if (savedIp) document.getElementById("ip-input").value = savedIp;
+
+  function getBase() {
+    const ip   = document.getElementById("ip-input").value.trim();
+    const port = document.getElementById("port-input").value.trim() || "8000";
+    return `http://${ip}:${port}`;
+  }
+
+  function log(msg, type = "") {
+    const el  = document.getElementById("log");
+    const div = document.createElement("div");
+    div.className = `entry ${type}`;
+    div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    el.prepend(div);
+    // Keep only last 50 lines
+    while (el.children.length > 50) el.removeChild(el.lastChild);
+  }
+
+  function setStatus(text, cls = "") {
+    const el = document.getElementById("status");
+    el.textContent = `● ${text}`;
+    el.className = cls;
+  }
+
+  // ── Connect: load MJPEG stream ──────────────────────────────────
+  function connect() {
+    const ip = document.getElementById("ip-input").value.trim();
+    if (!ip) { log("Please enter the Pi's IP address", "err"); return; }
+
+    localStorage.setItem("sorter_ip", ip);
+    baseUrl = getBase();
+
+    const wrap = document.getElementById("camera-wrap");
+
+    // Remove existing stream element if any
+    if (streamEl) { streamEl.onerror = null; streamEl.src = ""; wrap.removeChild(streamEl); }
+    document.getElementById("placeholder")?.remove();
+
+    streamEl = document.createElement("img");
+    streamEl.alt = "Camera stream";
+    streamEl.src = `${baseUrl}/stream`;
+
+    streamEl.onload = () => {
+      setStatus("Stream connected", "ok");
+      log(`MJPEG stream connected → ${streamEl.src}`, "ok");
+      document.getElementById("btn-snapshot").disabled = false;
+    };
+
+    streamEl.onerror = () => {
+      setStatus("Stream error — check IP / server", "error");
+      log(`Cannot reach ${streamEl.src}`, "err");
+    };
+
+    wrap.appendChild(streamEl);
+
+    log(`Connecting to ${baseUrl}/stream …`);
+    setStatus("Connecting…");
+
+    // Start polling health every 3 s
+    if (healthInterval) clearInterval(healthInterval);
+    healthInterval = setInterval(checkHealth, 3000);
+    checkHealth();   // immediate first call
+  }
+
+  // ── Health check ────────────────────────────────────────────────
+  async function checkHealth() {
+    if (!baseUrl) return;
+    try {
+      const r = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(3000) });
+      const d = await r.json();
+
+      document.getElementById("m-fps").textContent    = d.camera_fps != null ? d.camera_fps.toFixed(1) : "—";
+      document.getElementById("m-status").textContent = d.system_state ?? "—";
+      document.getElementById("m-temp").textContent   = d.cpu_temp_c   ? `${d.cpu_temp_c.toFixed(1)}°C` : "—";
+      document.getElementById("m-uptime").textContent = d.uptime_s != null ? fmtUptime(d.uptime_s) : "—";
+
+      if (r.ok) {
+        setStatus(`Online — ${d.status}`, "ok");
+      } else {
+        setStatus(`Degraded (${r.status})`, "error");
+      }
+    } catch (e) {
+      setStatus("Health check failed", "error");
+      log(`Health check error: ${e.message}`, "err");
+    }
+  }
+
+  // ── Snapshot ────────────────────────────────────────────────────
+  async function takeSnapshot() {
+    if (!baseUrl) return;
+    log("Requesting snapshot…");
+    try {
+      const r = await fetch(`${baseUrl}/api/camera/snapshot`, { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      const url  = URL.createObjectURL(blob);
+
+      // Open in new tab so it's saveable on mobile
+      window.open(url, "_blank");
+      log("Snapshot opened in new tab", "ok");
+    } catch (e) {
+      log(`Snapshot failed: ${e.message}`, "err");
+    }
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────
+  function fmtUptime(s) {
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    if (h)  return `${h}h ${m}m`;
+    if (m)  return `${m}m ${sec}s`;
+    return `${sec}s`;
+  }
+</script>
+</body>
+</html>

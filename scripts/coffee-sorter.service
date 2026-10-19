@@ -1,0 +1,79 @@
+# ============================================================
+# Coffee Bean Sorting System — systemd service unit
+#
+# Install:
+#   sudo cp scripts/coffee-sorter.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable coffee-sorter
+#   sudo systemctl start  coffee-sorter
+#
+# Manage:
+#   sudo systemctl status  coffee-sorter
+#   sudo systemctl restart coffee-sorter
+#   sudo journalctl -u coffee-sorter -f
+# ============================================================
+
+[Unit]
+Description=Coffee Bean Sorting System (FastAPI + Gunicorn)
+Documentation=https://github.com/your-org/coffee_bean_sorting
+After=network-online.target
+Wants=network-online.target
+# Restart after network is available — important for NTP time sync
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=notify
+
+# ── Identity ──────────────────────────────────────────────────
+# Change 'pi' to your actual username
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/projects/coffee_bean_sorting
+
+# ── Environment ───────────────────────────────────────────────
+# Load variables from .env file
+EnvironmentFile=/home/pi/projects/coffee_bean_sorting/.env
+Environment=PYTHONPATH=/home/pi/projects/coffee_bean_sorting
+Environment=PYTHONUNBUFFERED=1
+
+# ── Command ───────────────────────────────────────────────────
+ExecStart=/home/pi/projects/coffee_bean_sorting/venv/bin/gunicorn \
+    backend.main:app \
+    -c /home/pi/projects/coffee_bean_sorting/gunicorn.conf.py
+
+# Pre-start: run any pending DB migrations automatically
+ExecStartPre=/home/pi/projects/coffee_bean_sorting/venv/bin/alembic \
+    -c /home/pi/projects/coffee_bean_sorting/alembic.ini \
+    upgrade head
+
+# Graceful reload (zero-downtime config changes):
+ExecReload=/bin/kill -s HUP $MAINPID
+
+# ── Restart policy ────────────────────────────────────────────
+Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# ── Logging ───────────────────────────────────────────────────
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=coffee-sorter
+
+# ── Security hardening ────────────────────────────────────────
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+# Allow writes to project data/, logs/ directories
+ReadWritePaths=/home/pi/projects/coffee_bean_sorting/data
+ReadWritePaths=/home/pi/projects/coffee_bean_sorting/logs
+
+# ── Resource limits ───────────────────────────────────────────
+# Prevent a runaway process from eating all RAM on the Pi
+MemoryMax=512M
+# Nice value — slightly lower priority than system processes
+Nice=5
+
+[Install]
+WantedBy=multi-user.target
