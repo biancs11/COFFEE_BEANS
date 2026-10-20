@@ -374,3 +374,135 @@ def list_training_images(training_dir: Path) -> dict[str, list[dict]]:
                         pass
         result[grade_key] = imgs
     return result
+
+
+# ═════════════════════════════════════════════════════════════
+#  SNAPSHOT MANAGEMENT
+#  Auto-captured idle frames stored in data/snapshots/
+#  Unlabelled = waiting for human review
+#  Labelled   = moved to grade sub-folder, used in training
+# ═════════════════════════════════════════════════════════════
+
+def save_snapshot(
+    frame_bgr: "np.ndarray",
+    snapshot_dir: Path,
+    quality: int = 90,
+) -> Path:
+    """
+    Save a raw camera frame to data/snapshots/unlabelled/.
+    Called by the detector when no beans are present.
+
+    Args:
+        frame_bgr:    OpenCV BGR numpy array
+        snapshot_dir: base snapshot dir (data/snapshots/)
+        quality:      JPEG quality (default 90)
+
+    Returns the saved file path.
+    """
+    import uuid as _uuid
+    unlabelled = snapshot_dir / "unlabelled"
+    unlabelled.mkdir(parents=True, exist_ok=True)
+
+    fname = unlabelled / f"snap_{_uuid.uuid4().hex[:10]}.jpg"
+    cv2.imwrite(str(fname), frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    logger.debug(f"Snapshot saved: {fname}")
+    return fname
+
+
+def label_snapshot(
+    snapshot_dir: Path,
+    filename: str,
+    grade_key: str,
+) -> Path:
+    """
+    Move a snapshot from unlabelled/ to labelled/<grade_key>/.
+    This makes it available for the next training run.
+
+    Args:
+        snapshot_dir: base snapshot dir (data/snapshots/)
+        filename:     just the filename, e.g. "snap_abc123.jpg"
+        grade_key:    one of grade1 / grade2 / grade3 / grade4
+
+    Returns the new destination path.
+    Raises ValueError on invalid grade or missing file.
+    """
+    if grade_key not in GRADE_KEYS:
+        raise ValueError(f"Invalid grade '{grade_key}'. Must be one of {GRADE_KEYS}")
+
+    src = snapshot_dir / "unlabelled" / Path(filename).name
+    if not src.exists():
+        raise FileNotFoundError(f"Snapshot not found: {filename}")
+
+    dest_dir = snapshot_dir / "labelled" / grade_key
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / src.name
+
+    shutil.move(str(src), str(dest))
+    logger.info(f"Snapshot labelled: {src.name} → {grade_key}/")
+    return dest
+
+
+def delete_snapshot(snapshot_dir: Path, filename: str) -> bool:
+    """
+    Delete a snapshot from unlabelled/ (reject it — not useful for training).
+    Returns True on success.
+    """
+    target = snapshot_dir / "unlabelled" / Path(filename).name
+    try:
+        target.unlink(missing_ok=True)
+        return True
+    except Exception as exc:
+        logger.error(f"Failed to delete snapshot {filename}: {exc}")
+        return False
+
+
+def list_snapshots(snapshot_dir: Path) -> dict:
+    """
+    Return counts and metadata for all snapshots.
+
+    Returns:
+        {
+          "unlabelled": [ {filename, size_bytes, url_path}, ... ],
+          "labelled": {
+              "grade1": [ {filename, size_bytes}, ... ],
+              ...
+          },
+          "counts": { "unlabelled": N, "grade1": N, ... }
+        }
+    """
+    result: dict = {"unlabelled": [], "labelled": {}, "counts": {}}
+
+    # Unlabelled
+    unlabelled_dir = snapshot_dir / "unlabelled"
+    unlabelled: list[dict] = []
+    if unlabelled_dir.exists():
+        for f in sorted(unlabelled_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if f.suffix.lower() in (".jpg", ".jpeg", ".png"):
+                try:
+                    unlabelled.append({
+                        "filename":   f.name,
+                        "size_bytes": f.stat().st_size,
+                    })
+                except Exception:
+                    pass
+    result["unlabelled"] = unlabelled
+    result["counts"]["unlabelled"] = len(unlabelled)
+
+    # Labelled per grade
+    for grade_key in GRADE_KEYS:
+        grade_dir = snapshot_dir / "labelled" / grade_key
+        imgs: list[dict] = []
+        if grade_dir.exists():
+            for f in sorted(grade_dir.iterdir()):
+                if f.suffix.lower() in (".jpg", ".jpeg", ".png"):
+                    try:
+                        imgs.append({
+                            "filename":   f.name,
+                            "size_bytes": f.stat().st_size,
+                        })
+                    except Exception:
+                        pass
+        result["labelled"][grade_key] = imgs
+        result["counts"][grade_key]   = len(imgs)
+
+    return result

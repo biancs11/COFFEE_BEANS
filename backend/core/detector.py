@@ -69,10 +69,34 @@ def _resolve_profile_path() -> Path:
 TRAINING_DIR = _resolve_training_dir()
 PROFILE_PATH = _resolve_profile_path()
 
+def _resolve_snapshot_dir() -> Path:
+    """Auto-captured frames (no beans present) waiting for human labelling."""
+    try:
+        from .config import settings as _s
+        p = Path(_s.training_dir_path).parent / "snapshots"
+    except Exception:
+        p = _HERE / "data" / "snapshots"
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "unlabelled").mkdir(exist_ok=True)
+    (p / "labelled" / "grade1").mkdir(parents=True, exist_ok=True)
+    (p / "labelled" / "grade2").mkdir(parents=True, exist_ok=True)
+    (p / "labelled" / "grade3").mkdir(parents=True, exist_ok=True)
+    (p / "labelled" / "grade4").mkdir(parents=True, exist_ok=True)
+    return p
+
+SNAPSHOT_DIR = _resolve_snapshot_dir()
+
 # ─────────────────────────────────────────────────────────────
 #  CALIBRATION
 # ─────────────────────────────────────────────────────────────
 PIXELS_PER_MM: float = 18.0
+
+# ─────────────────────────────────────────────────────────────
+#  FAST PRE-CHECK THRESHOLD
+#  Minimum mask pixel count before running expensive watershed +
+#  contour pipeline.  Below this → assume no beans present.
+# ─────────────────────────────────────────────────────────────
+MIN_MASK_PIXELS = 300   # ~10×10 px cluster minimum
 
 # ─────────────────────────────────────────────────────────────
 #  BROAD HSV DETECTION MASK  (deliberately wide — every coffee
@@ -286,6 +310,15 @@ class BeanDetector:
         self._bean_id = 0
         self.profiles = GradeProfiles()
 
+        # ── Snapshot / idle-state tracking ───────────────────
+        # When no beans are detected for N consecutive frames we
+        # auto-save a snapshot for later human labelling.
+        self._no_bean_streak      = 0       # consecutive frames with no beans
+        self._snapshot_interval   = 150     # save snapshot every N no-bean frames (~5s @ 30fps)
+        self._snapshot_max        = 500     # max snapshots in unlabelled folder
+        self._snapshot_dir        = SNAPSHOT_DIR
+        self._last_snapshot_count = 0       # total snapshots saved this session
+
         # Try to load saved profiles immediately
         loaded = self.profiles.load()
         if loaded:
@@ -299,6 +332,99 @@ class BeanDetector:
 
     def load_profiles(self) -> bool:
         return self.profiles.load()
+
+    # ─────────────────────────────────────────────────────────
+    #  FAST PRE-CHECK  — cheap mask pixel count
+    #  Runs in ~1ms (vs ~20ms for full pipeline).
+    #  Returns True if enough coloured pixels exist to warrant
+    #  running the full detection pipeline.
+    # ─────────────────────────────────────────────────────────
+    def has_beans_quick(self, frame: np.ndarray) -> bool:
+        """
+        Cheap pre-check: balance + HSV + inRange only.
+        Returns True if mask has >= MIN_MASK_PIXELS coloured pixels.
+        Use this before calling detect() to skip the expensive
+        watershed + contour loop when the conveyor is empty.
+        """
+        if frame is None or frame.size == 0:
+            return False
+        try:
+            norm    = self._gray_world_balance(frame)
+            blurred = cv2.resize(norm, (norm.shape[1]//2, norm.shape[0]//2))  # half-res is enough
+            hsv     = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+            mask    = cv2.inRange(hsv, DETECT_LOWER, DETECT_UPPER)
+            mask    = cv2.bitwise_or(mask, cv2.inRange(hsv, MOLD_LOWER,   MOLD_UPPER))
+            mask    = cv2.bitwise_or(mask, cv2.inRange(hsv, BURNT_LOWER,  BURNT_UPPER))
+            # Strip shadows and reflections
+            s_ch = hsv[:, :, 1];  v_ch = hsv[:, :, 2]
+            mask[(s_ch < SHADOW_SAT_MAX) & (v_ch < SHADOW_VAL_MAX)] = 0
+            mask[(v_ch > REFLECTION_V_MIN) & (s_ch < REFLECTION_S_MAX)] = 0
+            return int(cv2.countNonZero(mask)) >= MIN_MASK_PIXELS
+        except Exception:
+            return True   # on error, assume beans present (safe default)
+
+    # ─────────────────────────────────────────────────────────
+    #  SNAPSHOT SAVING  — captures idle frames for AI learning
+    # ─────────────────────────────────────────────────────────
+    def _maybe_save_snapshot(self, frame: np.ndarray) -> bool:
+        """
+        Called when no beans were detected this frame.
+        Increments the no-bean streak counter. Every
+        _snapshot_interval frames, saves the frame to
+        data/snapshots/unlabelled/ for later human labelling.
+
+        Returns True if a snapshot was saved.
+        """
+        self._no_bean_streak += 1
+
+        if self._no_bean_streak % self._snapshot_interval != 0:
+            return False
+
+        try:
+            unlabelled_dir = self._snapshot_dir / "unlabelled"
+            # Cap total unlabelled snapshots to avoid filling the SD card
+            existing = list(unlabelled_dir.glob("*.jpg"))
+            if len(existing) >= self._snapshot_max:
+                # Delete the oldest ones to make room (keep last 400)
+                existing.sort(key=lambda p: p.stat().st_mtime)
+                for old in existing[:100]:
+                    old.unlink(missing_ok=True)
+
+            import uuid as _uuid
+            fname = unlabelled_dir / f"snap_{_uuid.uuid4().hex[:10]}.jpg"
+            cv2.imwrite(
+                str(fname), frame,
+                [cv2.IMWRITE_JPEG_QUALITY, 90]
+            )
+            self._last_snapshot_count += 1
+            logger.debug(f"Snapshot saved: {fname.name} (streak={self._no_bean_streak})")
+            return True
+        except Exception as exc:
+            logger.warning(f"Snapshot save failed: {exc}")
+            return False
+
+    def reset_no_bean_streak(self) -> None:
+        """Call when beans ARE detected to reset the idle counter."""
+        self._no_bean_streak = 0
+
+    @property
+    def snapshot_stats(self) -> dict:
+        """Return snapshot counts for the health/status endpoint."""
+        try:
+            unlabelled = len(list((self._snapshot_dir / "unlabelled").glob("*.jpg")))
+            labelled   = {
+                g: len(list((self._snapshot_dir / "labelled" / g).glob("*.jpg")))
+                for g in ("grade1", "grade2", "grade3", "grade4")
+            }
+        except Exception:
+            unlabelled = 0
+            labelled   = {}
+        return {
+            "unlabelled":      unlabelled,
+            "labelled":        labelled,
+            "saved_session":   self._last_snapshot_count,
+            "no_bean_streak":  self._no_bean_streak,
+        }
 
     # ─────────────────────────────────────────────────────────
     #  MAIN DETECT
@@ -437,6 +563,19 @@ class BeanDetector:
                 (10, annotated.shape[0] - 12),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                 (255, 255, 255), 2, cv2.LINE_AA,
+            )
+            # Reset idle counter — beans are present
+            self.reset_no_bean_streak()
+        else:
+            # No beans detected — save snapshot for AI learning
+            self._maybe_save_snapshot(frame)
+            # Overlay idle indicator on annotated frame
+            cv2.putText(
+                annotated,
+                f"No beans  {'[ML]' if self.profiles.is_trained else '[HSV]'}",
+                (10, annotated.shape[0] - 12),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.50,
+                (120, 120, 120), 1, cv2.LINE_AA,
             )
 
         return beans, annotated
@@ -844,27 +983,34 @@ class BeanDetector:
         self, training_dir: Path = TRAINING_DIR
     ) -> dict:
         """
-        Scan  data/training/<grade>/<image>  folders.
-        Each image is treated as a single bean sample:
-          • Detect blobs in the image
-          • Extract features from the largest blob (assumed to be the bean)
-          • If no blob found, extract features from the whole image ROI
-        Rebuilds and saves profiles.json.
-        Returns a summary dict.
+        Scan  data/training/<grade>/<image>  folders AND
+              data/snapshots/labelled/<grade>/<image>  folders.
+
+        Each image is treated as one or more bean samples:
+          • Detect blobs → extract features per blob
+          • If no blob found → extract from whole image ROI
+            (handles tightly-cropped close-up shots)
+
+        Rebuilds and saves bean_profiles.json.
+        Returns a summary dict with per-grade sample counts.
+
+        The more labelled images in each grade folder, the better
+        the ML classifier becomes — it learns the actual colour,
+        texture, and shape distribution of your specific coffee beans.
         """
         from .trainer import extract_features_from_image
 
         grade_keys = ["grade1", "grade2", "grade3", "grade4"]
         samples: dict[str, list[list[float]]] = {k: [] for k in grade_keys}
-        stats: dict[str, int] = {}
-        errors: list[str] = []
+        stats:   dict[str, int]               = {}
+        errors:  list[str]                    = []
 
+        # ── Scan standard training dir ────────────────────────
         for grade_key in grade_keys:
             grade_dir = training_dir / grade_key
             if not grade_dir.exists():
                 stats[grade_key] = 0
                 continue
-
             img_files = [
                 f for f in grade_dir.iterdir()
                 if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp", ".webp")
@@ -878,8 +1024,41 @@ class BeanDetector:
                         count += len(feats)
                 except Exception as exc:
                     errors.append(f"{img_path.name}: {exc}")
-
             stats[grade_key] = count
+
+        # ── Also scan labelled snapshots ──────────────────────
+        # These are auto-captured frames that a human has dragged
+        # into data/snapshots/labelled/<grade>/ for AI learning.
+        snap_labelled_dir = self._snapshot_dir / "labelled"
+        snap_counts: dict[str, int] = {}
+        if snap_labelled_dir.exists():
+            for grade_key in grade_keys:
+                snap_grade_dir = snap_labelled_dir / grade_key
+                if not snap_grade_dir.exists():
+                    snap_counts[grade_key] = 0
+                    continue
+                snap_files = [
+                    f for f in snap_grade_dir.iterdir()
+                    if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+                ]
+                count = 0
+                for img_path in snap_files:
+                    try:
+                        feats = extract_features_from_image(img_path, self.ppm)
+                        if feats:
+                            samples[grade_key].extend(feats)
+                            count += len(feats)
+                    except Exception as exc:
+                        errors.append(f"snap/{grade_key}/{img_path.name}: {exc}")
+                snap_counts[grade_key] = count
+                if count:
+                    logger.info(f"  snapshots/{grade_key}: +{count} labelled samples")
+        else:
+            snap_counts = {k: 0 for k in grade_keys}
+
+        # Merge snapshot counts into stats
+        for k in grade_keys:
+            stats[k] = stats.get(k, 0) + snap_counts.get(k, 0)
             logger.info(f"Training — {grade_key}: {count} samples from {len(img_files)} images")
 
         total = sum(stats.values())
@@ -896,11 +1075,15 @@ class BeanDetector:
 
         return {
             "ok": True,
-            "message": f"Trained on {total} samples across {len([k for k,v in stats.items() if v>0])} grades.",
-            "stats": stats,
-            "errors": errors,
-            "saved": saved,
-            "mode": "ML" if self.profiles.is_trained else "HSV",
+            "message": (
+                f"Trained on {total} samples across "
+                f"{len([k for k,v in stats.items() if v>0])} grades."
+            ),
+            "stats":        stats,
+            "snap_counts":  snap_counts,
+            "errors":       errors,
+            "saved":        saved,
+            "mode":         "ML" if self.profiles.is_trained else "HSV",
         }
 
     def get_training_status(self) -> dict:
@@ -910,6 +1093,8 @@ class BeanDetector:
             "grade_stats":   self.profiles.grade_stats(),
             "profile_path":  str(PROFILE_PATH),
             "training_dir":  str(TRAINING_DIR),
+            "snapshot_dir":  str(SNAPSHOT_DIR),
+            "snapshots":     self.snapshot_stats,
         }
 
 

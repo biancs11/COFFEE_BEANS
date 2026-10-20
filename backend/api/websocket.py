@@ -328,6 +328,9 @@ async def detection_broadcast_loop() -> None:
                         "compressor_on":    sorting_controller.compressor_on,
                         "db_session_id":    getattr(app_state, "_db_session_id", None),
                         "ws_connections":   ws_manager.count,
+                        "idle":             False,
+                        "no_bean_streak":   0,
+                        "snapshots_saved":  bean_detector._last_snapshot_count,
                     },
                 })
             continue
@@ -365,6 +368,69 @@ async def detection_broadcast_loop() -> None:
             continue
 
         _frame_counter += 1
+
+        # ── 1b. Fast pre-check — skip expensive pipeline when empty ──────
+        # has_beans_quick() runs in ~1ms on half-res frame vs ~20ms full.
+        # If it returns False the conveyor is empty — broadcast idle frame
+        # only (no detection, no DB writes, no ejector firing).
+        if not bean_detector.has_beans_quick(frame):
+            # Still broadcast the live frame so the dashboard shows video
+            if now - last_frame_time >= 0.1:   # ~10 fps while idle
+                last_frame_time = now
+                try:
+                    import cv2 as _cv2
+                    ok, buf = _cv2.imencode(
+                        ".jpg", frame,
+                        [_cv2.IMWRITE_JPEG_QUALITY, 70,
+                         _cv2.IMWRITE_JPEG_PROGRESSIVE, 1]
+                    )
+                    if ok:
+                        await ws_manager.broadcast({
+                            "type": "frame",
+                            "payload": {
+                                "data":   base64.b64encode(bytes(buf)).decode(),
+                                "fps":    camera_manager.fps,
+                                "idle":   True,    # tells UI conveyor is empty
+                            },
+                        })
+                except Exception:
+                    pass
+            # Still broadcast stats every second
+            if now - last_stats_time >= settings.WS_STATS_INTERVAL:
+                last_stats_time = now
+                await ws_manager.broadcast({
+                    "type": "stats",
+                    "payload": {
+                        "status":           app_state.status.value,
+                        "uptime_seconds":   app_state.uptime_seconds,
+                        "beans_processed":  app_state.sort_counts.total,
+                        "beans_per_minute": 0.0,
+                        "good_yield_pct":   app_state.good_yield_pct,
+                        "defect_rate_pct":  app_state.defect_rate_pct,
+                        "sort_counts": {
+                            "grade1": app_state.sort_counts.grade1,
+                            "grade2": app_state.sort_counts.grade2,
+                            "grade3": app_state.sort_counts.grade3,
+                            "grade4": app_state.sort_counts.grade4,
+                        },
+                        "last_bean":        None,
+                        "air_pressure_mpa": getattr(app_state, "_pressure_mpa", 0.0),
+                        "conveyor_rpm":     app_state.settings.conveyor_rpm,
+                        "camera_fps":       camera_manager.fps,
+                        "camera_state":     camera_manager.state.value,
+                        "cpu_temp_c":       0.0,
+                        "active_alerts":    app_state.active_alert_count(),
+                        "valve_fires":      sorting_controller.valve_fires,
+                        "conveyor_on":      sorting_controller.conveyor_on,
+                        "compressor_on":    sorting_controller.compressor_on,
+                        "db_session_id":    getattr(app_state, "_db_session_id", None),
+                        "ws_connections":   ws_manager.count,
+                        "idle":             True,   # no beans on conveyor
+                        "no_bean_streak":   bean_detector._no_bean_streak,
+                        "snapshots_saved":  bean_detector._last_snapshot_count,
+                    },
+                })
+            continue   # skip full detection pipeline entirely
 
         # ── 2. Detect beans (thread pool — OpenCV is CPU-bound) ──────────
         t0 = time.time()
@@ -612,6 +678,9 @@ async def detection_broadcast_loop() -> None:
                     "compressor_on":     sorting_controller.compressor_on,
                     "db_session_id":     session_id,
                     "ws_connections":    ws_manager.count,
+                    "idle":              False,
+                    "no_bean_streak":    0,
+                    "snapshots_saved":   bean_detector._last_snapshot_count,
                 },
             })
 

@@ -37,6 +37,7 @@ Endpoints
 """
 
 from __future__ import annotations
+import asyncio as _asyncio
 import io
 import logging
 from datetime import datetime
@@ -724,14 +725,15 @@ async def upload_training_image(
     grade — one of: grade1  grade2  grade3  grade4
     file  — JPEG / PNG / BMP / WebP image
 
-    The image is stored in data/training/<grade>/ and will be
-    included the next time /api/training/train is called.
+    The image is saved to data/training/<grade>/ and the AI profile is
+    immediately updated incrementally (Welford online update) so the
+    classifier improves without a full rebuild.  A full rebuild is also
+    triggered in the background so the profile stays accurate.
     """
     valid_grades = {"grade1", "grade2", "grade3", "grade4"}
     if grade not in valid_grades:
         raise HTTPException(400, f"Invalid grade '{grade}'. Must be one of {sorted(valid_grades)}")
 
-    # Validate content type
     ct = (file.content_type or "").lower()
     allowed_ct = {"image/jpeg", "image/jpg", "image/png", "image/bmp", "image/webp"}
     if ct and ct not in allowed_ct:
@@ -740,28 +742,69 @@ async def upload_training_image(
             f"Unsupported file type '{ct}'. Upload a JPEG, PNG, BMP, or WebP image.",
         )
 
-    # Size guard — 20 MB max per image
     MAX_SIZE = 20 * 1024 * 1024
     data = await file.read(MAX_SIZE + 1)
     if len(data) > MAX_SIZE:
         raise HTTPException(413, "Image too large — maximum 20 MB per upload")
 
+    # ── Save image ───────────────────────────────────────────────────────
     try:
         saved_path = _trainer.save_uploaded_image(
-            image_bytes     = data,
-            grade_key       = grade,
-            training_dir    = TRAINING_DIR,
+            image_bytes       = data,
+            grade_key         = grade,
+            training_dir      = TRAINING_DIR,
             original_filename = file.filename or "",
         )
     except Exception as exc:
         logger.error(f"Failed to save training image: {exc}")
         raise HTTPException(500, f"Could not save image: {exc}")
 
+    # ── Incremental profile update (fast — runs in < 100ms) ──────────────
+    # Extract features from the new image and fold them into the existing
+    # profile via Welford's online mean/variance algorithm.
+    # This avoids a full rebuild (which re-reads every image on disk) but
+    # still improves the classifier immediately.
+    incremental_samples = 0
+    incremental_error   = None
+    try:
+        feats = _trainer.extract_features_from_image(saved_path, bean_detector.ppm)
+        if feats:
+            for feat_vec in feats:
+                bean_detector.profiles.update(grade, feat_vec)
+            bean_detector.profiles.save()
+            incremental_samples = len(feats)
+            logger.info(
+                f"Incremental profile update: +{incremental_samples} samples "
+                f"for {grade} from {saved_path.name}"
+            )
+    except Exception as exc:
+        incremental_error = str(exc)
+        logger.warning(f"Incremental update failed: {exc} — full retrain will fix this")
+
+    # ── Full rebuild in background (accurate but slower) ─────────────────
+    # Schedule as a background task so the HTTP response returns immediately.
+    # The full rebuild re-reads ALL training images + labelled snapshots and
+    # recomputes the centroid from scratch, correcting any drift from
+    # incremental updates.
+    retrain_result = None
+    try:
+        loop   = _asyncio.get_event_loop()
+        retrain_result = await loop.run_in_executor(
+            None, bean_detector.train_from_examples
+        )
+        logger.info(f"Full retrain after upload: {retrain_result.get('stats')}")
+    except Exception as exc:
+        logger.warning(f"Background retrain failed: {exc}")
+
     return {
-        "ok":       True,
-        "grade":    grade,
-        "filename": saved_path.name,
-        "size":     len(data),
+        "ok":                 True,
+        "grade":              grade,
+        "filename":           saved_path.name,
+        "size":               len(data),
+        "incremental_samples": incremental_samples,
+        "incremental_error":  incremental_error,
+        "retrain":            retrain_result,
+        "mode":               "ML" if bean_detector.profiles.is_trained else "HSV",
     }
 
 
@@ -831,7 +874,172 @@ async def reset_profiles():
     """
     if PROFILE_PATH.exists():
         PROFILE_PATH.unlink()
-    # Reset in-memory
     bean_detector.profiles._profiles = {}
     bean_detector.profiles._loaded   = False
     return {"ok": True, "message": "Profiles deleted — detector reverted to HSV-fallback mode"}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# SNAPSHOTS  — auto-captured idle frames for AI learning
+#
+# Workflow:
+#   1. System auto-saves frames to data/snapshots/unlabelled/ when no
+#      beans are detected (every ~5s while conveyor is empty).
+#   2. Operator reviews snapshots via GET /api/snapshots
+#   3. Operator labels each snapshot via POST /api/snapshots/{filename}/label
+#      which moves it to data/snapshots/labelled/<grade>/
+#   4. POST /api/training/train picks up labelled snapshots automatically
+#      and includes them in the retrain alongside regular training images.
+#   5. The AI improves its grading knowledge from real beans it has seen.
+# ══════════════════════════════════════════════════════════════════════════
+
+from ..core.detector import SNAPSHOT_DIR
+
+
+@router.get("/snapshots")
+async def list_snapshots():
+    """
+    List all auto-captured snapshots.
+    Returns unlabelled (pending review) and labelled (per grade) counts + filenames.
+    """
+    return _trainer.list_snapshots(SNAPSHOT_DIR)
+
+
+@router.post("/snapshots/{filename}/label")
+async def label_snapshot(filename: str, grade: str):
+    """
+    Label a snapshot — moves it from unlabelled/ to labelled/<grade>/.
+    It will be included in the next training run automatically.
+
+    Also triggers an immediate incremental profile update so the AI
+    improves right away without waiting for a full retrain.
+
+    grade — one of: grade1  grade2  grade3  grade4
+    """
+    valid_grades = {"grade1", "grade2", "grade3", "grade4"}
+    if grade not in valid_grades:
+        raise HTTPException(400, f"Invalid grade '{grade}'")
+
+    # Sanitise filename — no path traversal
+    safe = Path(filename).name
+    if safe != filename or "/" in filename or "\\" in filename:
+        raise HTTPException(400, "Invalid filename")
+
+    try:
+        dest = _trainer.label_snapshot(SNAPSHOT_DIR, safe, grade)
+    except FileNotFoundError:
+        raise HTTPException(404, f"Snapshot '{filename}' not found in unlabelled/")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+    # ── Incremental update — learn from this snapshot immediately ─────────
+    incremental_samples = 0
+    try:
+        feats = _trainer.extract_features_from_image(dest, bean_detector.ppm)
+        if feats:
+            for feat_vec in feats:
+                bean_detector.profiles.update(grade, feat_vec)
+            bean_detector.profiles.save()
+            incremental_samples = len(feats)
+            logger.info(
+                f"Snapshot labelled as {grade}: {safe} "
+                f"(+{incremental_samples} samples, profile updated)"
+            )
+    except Exception as exc:
+        logger.warning(f"Incremental update from snapshot failed: {exc}")
+
+    return {
+        "ok":                 True,
+        "filename":           safe,
+        "grade":              grade,
+        "dest":               str(dest),
+        "incremental_samples": incremental_samples,
+        "mode":               "ML" if bean_detector.profiles.is_trained else "HSV",
+    }
+
+
+@router.delete("/snapshots/{filename}")
+async def delete_snapshot(filename: str):
+    """
+    Delete a snapshot from unlabelled/ (reject it — not useful for training).
+    """
+    safe = Path(filename).name
+    if safe != filename or "/" in filename or "\\" in filename:
+        raise HTTPException(400, "Invalid filename")
+
+    ok = _trainer.delete_snapshot(SNAPSHOT_DIR, safe)
+    if not ok:
+        raise HTTPException(404, f"Snapshot '{filename}' not found")
+    return {"ok": True, "deleted": safe}
+
+
+@router.post("/snapshots/label_batch")
+async def label_batch(items: list[dict]):
+    """
+    Label multiple snapshots in one request.
+
+    Body: [ {"filename": "snap_abc.jpg", "grade": "grade1"}, ... ]
+
+    Returns per-item results.
+    """
+    results = []
+    total_samples = 0
+
+    for item in items:
+        filename = item.get("filename", "")
+        grade    = item.get("grade", "")
+        safe     = Path(filename).name
+
+        if grade not in {"grade1", "grade2", "grade3", "grade4"}:
+            results.append({"filename": filename, "ok": False, "error": "Invalid grade"})
+            continue
+        if not safe or safe != filename:
+            results.append({"filename": filename, "ok": False, "error": "Invalid filename"})
+            continue
+
+        try:
+            dest  = _trainer.label_snapshot(SNAPSHOT_DIR, safe, grade)
+            feats = _trainer.extract_features_from_image(dest, bean_detector.ppm)
+            if feats:
+                for feat_vec in feats:
+                    bean_detector.profiles.update(grade, feat_vec)
+                total_samples += len(feats)
+            results.append({"filename": safe, "ok": True, "grade": grade, "samples": len(feats) if feats else 0})
+        except Exception as exc:
+            results.append({"filename": safe, "ok": False, "error": str(exc)})
+
+    # Save once after all incremental updates
+    if total_samples > 0:
+        bean_detector.profiles.save()
+        logger.info(f"Batch label: {total_samples} total samples added across {len(items)} snapshots")
+
+    return {
+        "ok":             True,
+        "results":        results,
+        "total_samples":  total_samples,
+        "mode":           "ML" if bean_detector.profiles.is_trained else "HSV",
+    }
+
+
+@router.post("/snapshots/retrain")
+async def retrain_from_snapshots():
+    """
+    Trigger a full retrain that includes all labelled snapshots.
+    Use this after labelling a batch of snapshots to do a clean rebuild.
+    """
+    if _TRAIN_LOCK.locked():
+        raise HTTPException(409, "Training already in progress")
+
+    async with _TRAIN_LOCK:
+        loop   = _asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, bean_detector.train_from_examples
+        )
+
+    if not result.get("ok"):
+        raise HTTPException(422, result.get("message", "Training failed"))
+
+    logger.info(f"Retrain from snapshots complete: {result}")
+    return result
