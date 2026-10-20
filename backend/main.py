@@ -260,6 +260,19 @@ async def camera_test_page():
     return FileResponse(str(test_page), media_type="text/html")
 
 
+@app.get("/launcher", tags=["launcher"], include_in_schema=False)
+async def launcher_page():
+    """
+    Fullscreen launcher page — displayed on the Raspberry Pi screen.
+    Shows a big START button and live system status (polls /health).
+    Open in kiosk mode: chromium-browser --app=http://localhost:8000/launcher
+    """
+    launcher = PROJECT_ROOT / "launcher.html"
+    if not launcher.exists():
+        raise HTTPException(status_code=404, detail="launcher.html not found in project root")
+    return FileResponse(str(launcher), media_type="text/html")
+
+
 @app.get("/health", tags=["health"])
 async def health_check():
     """
@@ -377,8 +390,8 @@ if _frontend_dist.is_dir():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
-        # Never intercept API / WS / health routes
-        if full_path.startswith(("api/", "ws", "health", "stream")):
+        # Never intercept API / WS / health / standalone HTML routes
+        if full_path.startswith(("api/", "ws", "health", "stream", "launcher", "camera-test")):
             raise HTTPException(status_code=404)
         index = _frontend_dist / "index.html"
         if not index.exists():

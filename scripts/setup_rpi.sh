@@ -143,9 +143,9 @@ cat > "$AUTOSTART_DIR/coffee-sorter-kiosk.desktop" << EOF
 [Desktop Entry]
 Type=Application
 Name=Coffee Bean Sorter
-Exec=bash -c 'sleep 5 && chromium-browser --kiosk --noerrdialogs --disable-infobars --start-fullscreen http://localhost:8000'
+Exec=bash -c 'sleep 5 && chromium-browser --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble --no-first-run --window-size=1024,600 http://localhost:8000/launcher'
 EOF
-ok "Chromium kiosk autostart configured (opens on next desktop login)"
+ok "Chromium kiosk autostart configured → opens /launcher on Waveshare 7\" 1024x600"
 
 # ── Summary ───────────────────────────────────────────────────
 PI_IP=$(hostname -I | awk '{print $1}')

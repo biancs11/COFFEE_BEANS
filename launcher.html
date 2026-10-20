@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Coffee Bean Sorting System — Launcher</title>
+<style>
+  /* ── Reset & base ─────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --brown-dark:  #0f0a06;
+    --brown-mid:   #1a1008;
+    --brown:       #6f4e37;
+    --brown-light: #a0785a;
+    --gold:        #d4a76a;
+    --gold-bright: #f5c842;
+    --green:       #10b981;
+    --red:         #ef4444;
+    --yellow:      #f59e0b;
+    --blue:        #3b82f6;
+    --text:        rgba(255,255,255,0.92);
+    --text-dim:    rgba(255,255,255,0.42);
+    --text-faint:  rgba(255,255,255,0.18);
+    --border:      rgba(255,255,255,0.08);
+  }
+
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    /* Target Waveshare 7" 1024x600 */
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    background: var(--brown-dark);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    /* Prevent text scaling on small displays */
+    text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* ── Background ───────────────────────────────────────── */
+  #bg {
+    position: fixed; inset: 0; z-index: 0;
+    background:
+      radial-gradient(ellipse 80% 60% at 20% 50%, rgba(111,78,55,0.40) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 80% at 80% 30%, rgba(61,43,31,0.55) 0%, transparent 55%),
+      linear-gradient(145deg, #0f0a06 0%, #1a1008 30%, #221510 60%, #0c0806 100%);
+  }
+  #bg-noise {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    opacity: 0.35;
+  }
+
+  /* ── App shell — full screen grid ────────────────────── */
+  /* 1024x600: header ~52px, footer ~36px, main fills rest (~512px) */
+  #app {
+    position: relative; z-index: 1;
+    width: 100vw; height: 100vh;
+    display: grid;
+    grid-template-rows: 52px 1fr 36px;
+    grid-template-columns: 1fr;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+  }
+  #app.visible { opacity: 1; }
+
+  /* ── Header — compact for 600px height ───────────────── */
+  #header {
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    background: rgba(0,0,0,0.25);
+    backdrop-filter: blur(8px);
+    height: 52px;
+    flex-shrink: 0;
+  }
+  #logo-wrap { display: flex; align-items: center; gap: 10px; }
+  #logo-icon {
+    width: 34px; height: 34px;
+    background: linear-gradient(135deg, #6f4e37, #a0785a);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 3px 12px rgba(111,78,55,0.5);
+    font-size: 17px;
+    flex-shrink: 0;
+  }
+  #logo-title { font-size: 0.88rem; font-weight: 700; color: var(--text); }
+  #logo-sub   { font-size: 0.58rem; font-weight: 500; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; }
+
+  #header-right { display: flex; align-items: center; gap: 14px; }
+  #clock  { font-size: 0.95rem; font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; }
+  #pi-ip  { font-size: 0.62rem; color: var(--text-dim); font-family: monospace; }
+
+  /* ── Main area — two columns ──────────────────────────── */
+  /* 1024px wide: center gets ~690px, log panel gets 290px  */
+  #main {
+    display: grid;
+    grid-template-columns: 1fr 290px;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* ── Center column ────────────────────────────────────── */
+  #center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 24px;
+    gap: 14px;
+    min-height: 0;
+  }
+
+  /* Status badge */
+  #status-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    border-radius: 100px;
+    padding: 5px 16px;
+    font-size: 0.7rem; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    transition: all 0.4s ease;
+    border: 1.5px solid transparent;
+  }
+  #status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    flex-shrink: 0; transition: background 0.4s;
+  }
+  .badge-idle     { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.12); color: var(--text-dim); }
+  .badge-starting { background: rgba(245,158,11,0.12);  border-color: rgba(245,158,11,0.3);  color: var(--yellow); }
+  .badge-ready    { background: rgba(16,185,129,0.12);  border-color: rgba(16,185,129,0.3);  color: var(--green); }
+  .badge-running  { background: rgba(16,185,129,0.15);  border-color: rgba(16,185,129,0.4);  color: var(--green); }
+  .badge-error    { background: rgba(239,68,68,0.12);   border-color: rgba(239,68,68,0.3);   color: var(--red); }
+
+  /* ── BIG START BUTTON — sized for 1024x600 ───────────── */
+  /* 180px fits well: header(52) + badge(28) + btn(180) + stats(56) + footer(36) + gaps = ~380px < 512px main height */
+  #start-btn-wrap { position: relative; flex-shrink: 0; }
+
+  #start-btn {
+    position: relative;
+    width: 180px; height: 180px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    outline: none;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    background: radial-gradient(circle at 38% 38%, #8b6045 0%, #5a3520 55%, #3d2010 100%);
+    box-shadow:
+      0 0 0 3px rgba(212,167,106,0.25),
+      0 0 0 7px rgba(212,167,106,0.08),
+      0 16px 48px rgba(111,78,55,0.6),
+      0 6px 18px rgba(0,0,0,0.5),
+      inset 0 2px 4px rgba(255,255,255,0.15),
+      inset 0 -3px 6px rgba(0,0,0,0.4);
+    -webkit-user-select: none; user-select: none;
+  }
+  #start-btn:hover:not(:disabled) {
+    transform: scale(1.05);
+    box-shadow:
+      0 0 0 3px rgba(212,167,106,0.4),
+      0 0 0 12px rgba(212,167,106,0.1),
+      0 0 60px rgba(212,167,106,0.25),
+      0 20px 56px rgba(111,78,55,0.7),
+      inset 0 2px 4px rgba(255,255,255,0.15),
+      inset 0 -3px 6px rgba(0,0,0,0.4);
+  }
+  #start-btn:active:not(:disabled) { transform: scale(0.96); }
+  #start-btn:disabled { cursor: default; opacity: 0.6; }
+
+  /* Pulse rings when running */
+  #start-btn.running::before {
+    content: ''; position: absolute; inset: -14px; border-radius: 50%;
+    border: 2px solid rgba(16,185,129,0.4);
+    animation: pulse-ring 2s ease-out infinite;
+  }
+  #start-btn.running::after {
+    content: ''; position: absolute; inset: -26px; border-radius: 50%;
+    border: 1.5px solid rgba(16,185,129,0.18);
+    animation: pulse-ring 2s ease-out infinite 0.45s;
+  }
+  @keyframes pulse-ring {
+    0%   { transform: scale(0.95); opacity: 0.7; }
+    100% { transform: scale(1.14); opacity: 0; }
+  }
+
+  #btn-inner {
+    width: 100%; height: 100%; border-radius: 50%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 6px;
+  }
+  #btn-icon  { font-size: 42px; line-height: 1; transition: transform 0.3s; }
+  #btn-label { font-size: 1.15rem; font-weight: 800; letter-spacing: 0.06em; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,0.6); text-transform: uppercase; }
+  #btn-sub   { font-size: 0.56rem; font-weight: 500; color: rgba(255,255,255,0.4); letter-spacing: 0.1em; text-transform: uppercase; }
+
+  #start-btn.running #btn-icon { animation: spin-slow 8s linear infinite; }
+  @keyframes spin-slow { to { transform: rotate(360deg); } }
+
+  /* Action buttons row */
+  #action-row {
+    display: flex; align-items: center; gap: 10px;
+    flex-wrap: wrap; justify-content: center;
+  }
+
+  #stop-btn {
+    display: none;
+    background: rgba(239,68,68,0.12);
+    border: 1.5px solid rgba(239,68,68,0.35);
+    color: var(--red);
+    font-size: 0.7rem; font-weight: 700;
+    letter-spacing: 0.07em; text-transform: uppercase;
+    padding: 8px 20px; border-radius: 8px;
+    cursor: pointer; transition: background 0.2s;
+  }
+  #stop-btn:hover { background: rgba(239,68,68,0.22); }
+  #stop-btn.visible { display: block; }
+
+  #dashboard-link {
+    display: none;
+    align-items: center; gap: 7px;
+    background: linear-gradient(135deg, #6f4e37, #a0785a);
+    color: #fff; font-size: 0.78rem; font-weight: 700;
+    letter-spacing: 0.04em; padding: 10px 22px;
+    border-radius: 10px; cursor: pointer; border: none;
+    box-shadow: 0 5px 20px rgba(111,78,55,0.45);
+    text-decoration: none;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  #dashboard-link:hover { transform: translateY(-1px); box-shadow: 0 8px 28px rgba(111,78,55,0.6); }
+  #dashboard-link.visible { display: inline-flex; }
+
+  /* ── Stats row — compact for 1024x600 ────────────────── */
+  #stats-row {
+    display: flex; gap: 8px; flex-wrap: nowrap; justify-content: center;
+    width: 100%; max-width: 560px;
+  }
+  .stat-pill {
+    display: flex; flex-direction: column; align-items: center;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 10px;
+    flex: 1; min-width: 0;
+  }
+  .stat-val { font-size: 0.88rem; font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .stat-lbl { font-size: 0.54rem; color: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px; white-space: nowrap; }
+
+  /* ── Right panel — logs, narrow for 1024px ───────────── */
+  #log-panel {
+    border-left: 1px solid var(--border);
+    background: rgba(0,0,0,0.28);
+    display: flex; flex-direction: column;
+    overflow: hidden; min-height: 0;
+  }
+  #log-header {
+    padding: 10px 14px 8px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  #log-title { font-size: 0.65rem; font-weight: 700; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; }
+  #log-clear {
+    font-size: 0.58rem; padding: 2px 7px;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; color: var(--text-dim); cursor: pointer;
+    transition: color 0.15s;
+  }
+  #log-clear:hover { color: var(--text); }
+  #log-body {
+    flex: 1; overflow-y: auto;
+    padding: 8px 12px;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 0.62rem; line-height: 1.55;
+    color: rgba(255,255,255,0.5);
+  }
+  #log-body::-webkit-scrollbar { width: 3px; }
+  #log-body::-webkit-scrollbar-track { background: transparent; }
+  #log-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+  .log-ok   { color: #10b981; }
+  .log-warn { color: #f59e0b; }
+  .log-err  { color: #ef4444; }
+  .log-info { color: rgba(255,255,255,0.5); }
+  .log-ts   { color: rgba(255,255,255,0.18); margin-right: 5px; }
+
+  /* ── Footer — single line for 1024x600 ───────────────── */
+  #footer {
+    padding: 0 20px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-top: 1px solid var(--border);
+    background: rgba(0,0,0,0.2);
+    height: 36px; flex-shrink: 0;
+  }
+  #footer-left  { font-size: 0.58rem; color: var(--text-faint); letter-spacing: 0.05em; }
+  #footer-right { display: flex; gap: 14px; }
+  .footer-stat  { font-size: 0.58rem; color: var(--text-dim); }
+  .footer-val   { color: var(--gold); font-weight: 600; }
+
+  /* ── Touch targets — min 44px for touchscreen use ────── */
+  #start-btn, #stop-btn, #dashboard-link, #log-clear {
+    touch-action: manipulation;
+  }
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<div id="bg-noise"></div>
+
+<div id="app">
+
+  <!-- ── HEADER ── -->
+  <header id="header">
+    <div id="logo-wrap">
+      <div id="logo-icon">☕</div>
+      <div>
+        <div id="logo-title">CoffeeSort AI</div>
+        <div id="logo-sub">Sorting System · Launcher</div>
+      </div>
+    </div>
+    <div id="header-right">
+      <div id="pi-ip">---.---.---.---</div>
+      <div id="clock">--:--:--</div>
+    </div>
+  </header>
+
+  <!-- ── MAIN ── -->
+  <div id="main">
+
+    <!-- Center -->
+    <div id="center">
+
+      <div id="status-badge" class="badge-idle">
+        <span id="status-dot" style="background:#555"></span>
+        <span id="status-text">Checking system…</span>
+      </div>
+
+      <div id="start-btn-wrap">
+        <button id="start-btn" onclick="handleStart()" title="Start the Coffee Bean Sorting System">
+          <div id="btn-inner">
+            <span id="btn-icon">☕</span>
+            <span id="btn-label">START</span>
+            <span id="btn-sub">Tap to begin</span>
+          </div>
+        </button>
+      </div>
+
+      <div id="action-row">
+        <button id="stop-btn" onclick="handleStop()">■ Stop</button>
+        <a id="dashboard-link" href="/dashboard" target="_blank">Open Dashboard →</a>
+      </div>
+
+      <div id="stats-row">
+        <div class="stat-pill">
+          <span class="stat-val" id="stat-uptime">--</span>
+          <span class="stat-lbl">Uptime</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-val" id="stat-temp">--°C</span>
+          <span class="stat-lbl">CPU Temp</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-val" id="stat-mem">-- MB</span>
+          <span class="stat-lbl">Memory</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-val" id="stat-fps">-- fps</span>
+          <span class="stat-lbl">Camera</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-val" id="stat-cpu">--%</span>
+          <span class="stat-lbl">CPU</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Log panel -->
+    <div id="log-panel">
+      <div id="log-header">
+        <span id="log-title">System Log</span>
+        <button id="log-clear" onclick="clearLog()">Clear</button>
+      </div>
+      <div id="log-body"></div>
+    </div>
+
+  </div>
+
+  <!-- ── FOOTER ── -->
+  <footer id="footer">
+    <div id="footer-left">CoffeeSort v2.0 · Waveshare 7" 1024×600</div>
+    <div id="footer-right">
+      <span class="footer-stat">Server: <span class="footer-val" id="foot-server">--</span></span>
+      <span class="footer-stat">DB: <span class="footer-val" id="foot-db">--</span></span>
+      <span class="footer-stat">Sync: <span class="footer-val" id="foot-sync">--</span></span>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════
+const state = {
+  serverRunning: false,
+  systemState: 'idle',
+  startInProgress: false,
+  startRetries: 0,
+  MAX_START_RETRIES: 30,
+};
+
+// ═══════════════════════════════════════════════
+//  CLOCK
+// ═══════════════════════════════════════════════
+function updateClock() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('en-US', { hour12: false });
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ═══════════════════════════════════════════════
+//  LOG
+// ═══════════════════════════════════════════════
+function log(msg, type = 'info') {
+  const body = document.getElementById('log-body');
+  const ts   = new Date().toLocaleTimeString('en-US', { hour12: false });
+  const el   = document.createElement('div');
+  el.innerHTML = `<span class="log-ts">${ts}</span><span class="log-${type}">${esc(msg)}</span>`;
+  body.appendChild(el);
+  while (body.children.length > 200) body.removeChild(body.firstChild);
+  body.scrollTop = body.scrollHeight;
+}
+function clearLog() { document.getElementById('log-body').innerHTML = ''; }
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ═══════════════════════════════════════════════
+//  STATUS UI
+// ═══════════════════════════════════════════════
+const BADGE = {
+  idle:     { cls:'badge-idle',     dot:'#555',    text:'System Idle',    icon:'☕', label:'START',    sub:'Tap to begin'   },
+  starting: { cls:'badge-starting', dot:'#f59e0b', text:'Starting…',      icon:'⏳', label:'STARTING', sub:'Please wait…'   },
+  ready:    { cls:'badge-ready',    dot:'#10b981', text:'System Ready',   icon:'✅', label:'RUNNING',  sub:'System is ready'},
+  running:  { cls:'badge-running',  dot:'#10b981', text:'Sorting Active', icon:'☕', label:'RUNNING',  sub:'Tap for dash'   },
+  error:    { cls:'badge-error',    dot:'#ef4444', text:'System Error',   icon:'⚠️', label:'RETRY',    sub:'Tap to retry'   },
+};
+
+function setStatus(s) {
+  state.systemState = s;
+  const c = BADGE[s] || BADGE.idle;
+  document.getElementById('status-badge').setAttribute('class', c.cls);
+  document.getElementById('status-dot').style.background  = c.dot;
+  document.getElementById('status-text').textContent      = c.text;
+  document.getElementById('btn-icon').textContent         = c.icon;
+  document.getElementById('btn-label').textContent        = c.label;
+  document.getElementById('btn-sub').textContent          = c.sub;
+
+  const active = s === 'running' || s === 'ready';
+  const btn = document.getElementById('start-btn');
+  btn.disabled = s === 'starting';
+  btn.classList.toggle('running', active);
+  document.getElementById('stop-btn').classList.toggle('visible', active);
+  document.getElementById('dashboard-link').classList.toggle('visible', active);
+
+  const srv = document.getElementById('foot-server');
+  srv.textContent   = active ? 'Online' : s === 'starting' ? 'Starting…' : 'Offline';
+  srv.style.color   = active ? '#10b981' : s === 'starting' ? '#f59e0b' : '#ef4444';
+}
+
+// ═══════════════════════════════════════════════
+//  HEALTH POLL  (every 2s)
+// ═══════════════════════════════════════════════
+async function pollHealth() {
+  try {
+    const res  = await fetch('/health', { cache:'no-store', signal: AbortSignal.timeout(3000) });
+    if (!res.ok && res.status !== 503) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    state.serverRunning = true;
+
+    document.getElementById('stat-uptime').textContent = fmtUptime(d.uptime_s  ?? 0);
+    document.getElementById('stat-temp').textContent   = (d.cpu_temp_c  ?? 0).toFixed(1) + '°C';
+    document.getElementById('stat-mem').textContent    = (d.mem_mb      ?? 0).toFixed(0) + 'MB';
+    document.getElementById('stat-fps').textContent    = (d.camera_fps  ?? 0).toFixed(1);
+    document.getElementById('stat-cpu').textContent    = (d.cpu_pct     ?? 0).toFixed(0) + '%';
+
+    const db = document.getElementById('foot-db');
+    db.textContent  = 'OK'; db.style.color = '#10b981';
+    document.getElementById('foot-sync').textContent =
+      new Date().toLocaleTimeString('en-US', { hour12: false });
+    document.getElementById('pi-ip').textContent =
+      `${window.location.hostname}:${window.location.port || 8000}`;
+
+    if (d.status === 'degraded') {
+      if (state.systemState !== 'error') { setStatus('error'); log('System degraded', 'err'); }
+    } else if ((d.system_state ?? '') === 'sorting') {
+      if (state.systemState !== 'running') { setStatus('running'); log('Sorting active', 'ok'); }
+    } else {
+      if (state.systemState === 'starting' || state.systemState === 'idle') {
+        setStatus('ready'); log('System online and ready', 'ok'); state.startRetries = 0;
+      }
+    }
+    if ((d.cpu_temp_c ?? 0) > 75) log(`High temp: ${d.cpu_temp_c.toFixed(1)}°C`, 'warn');
+
+  } catch (e) {
+    state.serverRunning = false;
+    const db = document.getElementById('foot-db');
+    db.textContent = 'Offline'; db.style.color = '#ef4444';
+
+    if (state.startInProgress) {
+      state.startRetries++;
+      if (state.startRetries >= state.MAX_START_RETRIES) {
+        setStatus('error');
+        log('Server did not start within 60s', 'err');
+        log('Run: bash ~/COFFEE_BEANS/start_system.sh', 'warn');
+        state.startInProgress = false;
+      }
+    } else if (state.systemState !== 'idle') {
+      setStatus('idle'); log('Server offline', 'warn');
+    }
+  }
+}
+
+function fmtUptime(s) {
+  if (s < 60)   return `${s}s`;
+  if (s < 3600) return `${Math.floor(s/60)}m`;
+  return `${Math.floor(s/3600)}h${Math.floor((s%3600)/60)}m`;
+}
+
+// ═══════════════════════════════════════════════
+//  START
+// ═══════════════════════════════════════════════
+async function handleStart() {
+  if (state.startInProgress) return;
+  if (state.systemState === 'running' || state.systemState === 'ready') {
+    window.open('/dashboard', '_blank'); return;
+  }
+  if (state.serverRunning) { window.open('/dashboard', '_blank'); return; }
+
+  log('Starting system…', 'info');
+  setStatus('starting');
+  state.startInProgress = true;
+  state.startRetries = 0;
+
+  try {
+    const res = await fetch('/api/system/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'start' }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      log('Start command sent', 'ok');
+      setStatus('running');
+      state.startInProgress = false;
+      return;
+    }
+  } catch (_) {
+    log('Waiting for server…', 'warn');
+  }
+  log('Poll will detect server when it comes up', 'info');
+}
+
+// ═══════════════════════════════════════════════
+//  STOP
+// ═══════════════════════════════════════════════
+async function handleStop() {
+  if (!confirm('Stop the sorting system?')) return;
+  log('Sending stop…', 'warn');
+  try {
+    const res = await fetch('/api/system/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'stop' }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) { log('Stopped', 'ok'); setStatus('idle'); }
+    else log(`Stop failed: ${res.status}`, 'err');
+  } catch (e) { log(`Error: ${e.message}`, 'err'); }
+}
+
+// ═══════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', async () => {
+  setTimeout(() => document.getElementById('app').classList.add('visible'), 80);
+  log('Launcher ready — Waveshare 7" 1024×600', 'ok');
+  await pollHealth();
+  setInterval(pollHealth, 2000);
+});
+</script>
+</body>
+</html>
