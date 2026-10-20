@@ -306,18 +306,34 @@ class CameraManager:
 
         self._ip_stream_source = None
 
-        # Local USB/webcam — try indices 0, 1, 2
-        for idx in (0, 1, 2):
-            cap = cv2.VideoCapture(idx)
-            if cap.isOpened():
+        # Local camera — scan indices 0..35 to support Raspberry Pi CSI cameras
+        # on Debian Trixie / Pi OS Bookworm where the CSI camera shows up at
+        # higher indices (e.g. /dev/video23) instead of /dev/video0.
+        # We skip metadata-only V4L2 sub-devices by verifying a frame can be read.
+        tried = []
+        for idx in list(range(0, 36)):
+            try:
+                cap = cv2.VideoCapture(idx)
+                if not cap.isOpened():
+                    cap.release()
+                    continue
+                # Verify the device actually produces frames (skip meta devices)
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    cap.release()
+                    continue
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH,  settings.CAMERA_WIDTH)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, settings.CAMERA_HEIGHT)
                 cap.set(cv2.CAP_PROP_FPS,           settings.CAMERA_FPS)
                 cap.set(cv2.CAP_PROP_BUFFERSIZE,    1)
                 self._cap = cap
-                logger.info(f"Local camera opened at index {idx}")
+                logger.info(f"Camera opened at index {idx} (/dev/video{idx})")
                 return
-        raise RuntimeError("No camera device found at indices 0, 1, 2")
+            except Exception as exc:
+                tried.append(idx)
+                logger.debug(f"Camera index {idx} failed: {exc}")
+                continue
+        raise RuntimeError(f"No camera device found at indices 0-35. Tried: {tried}")
 
     def _release(self) -> None:
         if PICAMERA_AVAILABLE and self._picam:
