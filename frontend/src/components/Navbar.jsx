@@ -13,7 +13,8 @@ function formatDate(d) {
 
 export default function Navbar({ status, onToast, theme, onToggleTheme, currentPath, adminUser, onAdminLogout }) {
   const navigate = useNavigate()
-  const isAdmin  = currentPath === '/admin'
+  const isAdmin    = currentPath === '/admin'
+  const isTraining = currentPath === '/training'
   const [time,             setTime]             = useState('')
   const [date,             setDate]             = useState('')
   const [loading,          setLoading]          = useState(false)
@@ -102,10 +103,17 @@ export default function Navbar({ status, onToast, theme, onToggleTheme, currentP
       {/* ── CENTRE: View switcher ── */}
       <div className="navbar-view-switcher">
         <button
-          className={`navbar-view-btn${!isAdmin ? ' active' : ''}`}
+          className={`navbar-view-btn${!isAdmin && !isTraining ? ' active' : ''}`}
           onClick={() => navigate('/dashboard')}
         >
           📷 Operator
+        </button>
+        <button
+          className={`navbar-view-btn${isTraining ? ' active' : ''}`}
+          onClick={() => navigate('/training')}
+          title="Upload example images and train the AI detector"
+        >
+          🧠 Training
         </button>
         <button
           className={`navbar-view-btn${isAdmin ? ' active' : ''}`}
@@ -118,8 +126,8 @@ export default function Navbar({ status, onToast, theme, onToggleTheme, currentP
       {/* ── RIGHT: controls ── */}
       <div className="navbar-right">
 
-        {/* Status pill — hidden on Admin Dashboard */}
-        {!isAdmin && (
+        {/* Status pill — hidden on Admin Dashboard and Training page */}
+        {!isAdmin && !isTraining && (
           <div className="status-pill">
             <span className={`status-dot ${statusDotClass}`} />
             <span style={{ textTransform: 'uppercase', fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.06em' }}>
@@ -128,8 +136,8 @@ export default function Navbar({ status, onToast, theme, onToggleTheme, currentP
           </div>
         )}
 
-        {/* ── 3 persistent buttons — hidden on Admin Dashboard ── */}
-        {!isAdmin && (
+        {/* ── 3 persistent buttons — hidden on Admin Dashboard and Training page ── */}
+        {!isAdmin && !isTraining && (
           <>
             {/* START — only lit when system is fully stopped */}
             <button

@@ -6,6 +6,7 @@ import Landing        from './pages/Landing'
 import Dashboard      from './pages/Dashboard'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminLogin     from './components/AdminLogin'
+import Training       from './pages/Training'
 import { useWebSocket }  from './hooks/useWebSocket'
 import { useToast }      from './hooks/useToast'
 import { useAdminAuth }  from './hooks/useAdminAuth'
@@ -77,6 +78,9 @@ function MainApp({ theme, onToggleTheme }) {
             ) : (
               <AdminLogin onSuccess={login} />
             )
+          } />
+          <Route path="/training" element={
+            <Training onToast={addToast} />
           } />
           <Route path="/*" element={
             <Dashboard stats={stats} lastBean={lastBean} frame={frame} alerts={alerts} onToast={addToast} />

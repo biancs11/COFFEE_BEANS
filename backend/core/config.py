@@ -66,6 +66,18 @@ class Settings(BaseSettings):
     MAX_BEAN_AREA:          int   = 8000
     DETECTION_SENSITIVITY:  float = 0.85
 
+    # ── Training / example images ─────────────────────────────
+    # Directory that holds per-grade training image sub-folders.
+    # Sub-folders must be named: grade1  grade2  grade3  grade4
+    # Leave empty to use the default  data/training/  path.
+    TRAINING_DIR:   str = ""
+    # Path for the saved grade-profile JSON.
+    # Leave empty to use the default  data/bean_profiles.json  path.
+    PROFILE_PATH:   str = ""
+    # Maximum training images stored per grade (oldest deleted when exceeded).
+    # 0 = unlimited.
+    MAX_TRAINING_IMAGES_PER_GRADE: int = 200
+
     # ── Sorting hardware ──────────────────────────────────────
     CONVEYOR_RPM:           int   = 180
     EJECTION_DURATION_MS:   int   = 40
@@ -128,6 +140,26 @@ class Settings(BaseSettings):
             BinType.GRADE_3: {"id": "SV-03", "pin": self.GPIO_VALVE_GRADE2},
             BinType.GRADE_4: {"id": "SV-04", "pin": self.GPIO_VALVE_GRADE3},
         }
+
+    @property
+    def training_dir_path(self) -> Path:
+        if self.TRAINING_DIR:
+            p = Path(self.TRAINING_DIR)
+            if not p.is_absolute():
+                p = PROJECT_ROOT / p
+        else:
+            p = PROJECT_ROOT / "data" / "training"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    @property
+    def profile_path(self) -> Path:
+        if self.PROFILE_PATH:
+            p = Path(self.PROFILE_PATH)
+            if not p.is_absolute():
+                p = PROJECT_ROOT / p
+            return p
+        return PROJECT_ROOT / "data" / "bean_profiles.json"
 
 
 # Global singleton — import this everywhere

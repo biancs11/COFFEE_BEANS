@@ -40,6 +40,7 @@ from __future__ import annotations
 import io
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -676,3 +677,161 @@ async def camera_snapshot():
     if jpeg is None:
         raise HTTPException(503, "Camera not available")
     return StreamingResponse(io.BytesIO(jpeg), media_type="image/jpeg")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# TRAINING  — upload example images, trigger re-train, query status
+# ══════════════════════════════════════════════════════════════════════════
+
+import asyncio as _asyncio
+from fastapi import UploadFile, File, Form
+
+from ..core.detector import TRAINING_DIR, PROFILE_PATH
+from ..core import trainer as _trainer
+
+_TRAIN_LOCK = _asyncio.Lock()   # prevents concurrent train runs
+
+
+@router.get("/training/status")
+async def training_status():
+    """
+    Returns current detector mode (ML vs HSV-Fallback),
+    per-grade sample counts, paths, and training image inventory.
+    """
+    status   = bean_detector.get_training_status()
+    images   = _trainer.list_training_images(TRAINING_DIR)
+    img_counts = {k: len(v) for k, v in images.items()}
+    return {
+        **status,
+        "image_counts": img_counts,
+    }
+
+
+@router.get("/training/images")
+async def list_training_images():
+    """List all training images by grade with filenames and sizes."""
+    return _trainer.list_training_images(TRAINING_DIR)
+
+
+@router.post("/training/upload")
+async def upload_training_image(
+    grade: str = Form(...),
+    file:  UploadFile = File(...),
+):
+    """
+    Upload a single example image for the given grade.
+
+    grade — one of: grade1  grade2  grade3  grade4
+    file  — JPEG / PNG / BMP / WebP image
+
+    The image is stored in data/training/<grade>/ and will be
+    included the next time /api/training/train is called.
+    """
+    valid_grades = {"grade1", "grade2", "grade3", "grade4"}
+    if grade not in valid_grades:
+        raise HTTPException(400, f"Invalid grade '{grade}'. Must be one of {sorted(valid_grades)}")
+
+    # Validate content type
+    ct = (file.content_type or "").lower()
+    allowed_ct = {"image/jpeg", "image/jpg", "image/png", "image/bmp", "image/webp"}
+    if ct and ct not in allowed_ct:
+        raise HTTPException(
+            415,
+            f"Unsupported file type '{ct}'. Upload a JPEG, PNG, BMP, or WebP image.",
+        )
+
+    # Size guard — 20 MB max per image
+    MAX_SIZE = 20 * 1024 * 1024
+    data = await file.read(MAX_SIZE + 1)
+    if len(data) > MAX_SIZE:
+        raise HTTPException(413, "Image too large — maximum 20 MB per upload")
+
+    try:
+        saved_path = _trainer.save_uploaded_image(
+            image_bytes     = data,
+            grade_key       = grade,
+            training_dir    = TRAINING_DIR,
+            original_filename = file.filename or "",
+        )
+    except Exception as exc:
+        logger.error(f"Failed to save training image: {exc}")
+        raise HTTPException(500, f"Could not save image: {exc}")
+
+    return {
+        "ok":       True,
+        "grade":    grade,
+        "filename": saved_path.name,
+        "size":     len(data),
+    }
+
+
+@router.post("/training/train")
+async def run_training():
+    """
+    Re-train the grade profiles from all images in data/training/.
+    This is CPU-bound and may take a few seconds on a Raspberry Pi —
+    it runs in a thread pool so the event loop is not blocked.
+    Returns a summary with per-grade sample counts and any errors.
+    """
+    if _TRAIN_LOCK.locked():
+        raise HTTPException(409, "Training already in progress — try again shortly")
+
+    async with _TRAIN_LOCK:
+        loop   = _asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, bean_detector.train_from_examples
+        )
+
+    if not result.get("ok"):
+        raise HTTPException(422, result.get("message", "Training failed"))
+
+    logger.info(f"Training complete: {result}")
+    return result
+
+
+@router.delete("/training/images/{grade}/{filename}")
+async def delete_training_image(grade: str, filename: str):
+    """Delete a specific training image by grade and filename."""
+    valid_grades = {"grade1", "grade2", "grade3", "grade4"}
+    if grade not in valid_grades:
+        raise HTTPException(400, f"Invalid grade '{grade}'")
+
+    # Sanitise filename — no path traversal
+    safe = Path(filename).name
+    if safe != filename or "/" in filename or "\\" in filename:
+        raise HTTPException(400, "Invalid filename")
+
+    target = TRAINING_DIR / grade / safe
+    if not target.exists():
+        raise HTTPException(404, "Image not found")
+
+    ok = _trainer.delete_training_image(target)
+    if not ok:
+        raise HTTPException(500, "Could not delete image")
+
+    return {"ok": True, "deleted": filename, "grade": grade}
+
+
+@router.delete("/training/images/{grade}")
+async def clear_grade_images(grade: str):
+    """Delete ALL training images for one grade."""
+    valid_grades = {"grade1", "grade2", "grade3", "grade4"}
+    if grade not in valid_grades:
+        raise HTTPException(400, f"Invalid grade '{grade}'")
+
+    count = _trainer.clear_grade_folder(TRAINING_DIR, grade)
+    return {"ok": True, "grade": grade, "deleted": count}
+
+
+@router.delete("/training/profiles")
+async def reset_profiles():
+    """
+    Delete the saved profiles JSON, reverting the detector to HSV-fallback mode.
+    Does NOT delete training images — you can re-train after a reset.
+    """
+    if PROFILE_PATH.exists():
+        PROFILE_PATH.unlink()
+    # Reset in-memory
+    bean_detector.profiles._profiles = {}
+    bean_detector.profiles._loaded   = False
+    return {"ok": True, "message": "Profiles deleted — detector reverted to HSV-fallback mode"}

@@ -64,4 +64,30 @@ export const api = {
   // ── Camera ───────────────────────────────────────────────────
   snapshotUrl: () => `${BASE}/api/camera/snapshot?t=${Date.now()}`,
   streamUrl:   () => `${BASE}/stream`,
+
+  // ── Training / example images ────────────────────────────────
+  getTrainingStatus: () => request('GET', '/api/training/status'),
+  getTrainingImages: () => request('GET', '/api/training/images'),
+
+  /** Upload one image for the given grade (grade1..grade4).
+   *  @param {string} grade  'grade1' | 'grade2' | 'grade3' | 'grade4'
+   *  @param {File}   file   Browser File object
+   */
+  uploadTrainingImage: async (grade, file) => {
+    const form = new FormData()
+    form.append('grade', grade)
+    form.append('file',  file)
+    const res = await fetch(`${BASE}/api/training/upload`, { method: 'POST', body: form })
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try { detail = (await res.json()).detail || detail } catch (_) {}
+      throw new Error(detail)
+    }
+    return res.json()
+  },
+
+  runTraining:   ()                     => request('POST',   '/api/training/train'),
+  deleteTrainingImage: (grade, filename) => request('DELETE', `/api/training/images/${encodeURIComponent(grade)}/${encodeURIComponent(filename)}`),
+  clearGradeImages:    (grade)           => request('DELETE', `/api/training/images/${encodeURIComponent(grade)}`),
+  resetProfiles:       ()                => request('DELETE', '/api/training/profiles'),
 }
