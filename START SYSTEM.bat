@@ -1,7 +1,7 @@
 @echo off
 title Coffee Bean Sorting System
 color 0A
-cd /d "c:\wamp64\coffee_bean_sorting"
+cd /d "c:\Users\User\Documents\COFFEE_BEANS"
 
 echo.
 echo  ============================================
@@ -69,6 +69,6 @@ if not "%CHROME%"=="" (
 )
 
 echo  Server is running. Close this window to stop.
-echo  Logs: c:\wamp64\coffee_bean_sorting\logs\server.log
+echo  Logs: c:\Users\User\Documents\COFFEE_BEANS\logs\server.log
 echo.
 pause
