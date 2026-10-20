@@ -283,7 +283,9 @@ async def detection_broadcast_loop() -> None:
                     try:
                         import cv2
                         ok, buf = cv2.imencode(
-                            ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65]
+                            ".jpg", frame,
+                            [cv2.IMWRITE_JPEG_QUALITY, 78,
+                             cv2.IMWRITE_JPEG_PROGRESSIVE, 1]
                         )
                         if ok:
                             await ws_manager.broadcast({
@@ -515,15 +517,19 @@ async def detection_broadcast_loop() -> None:
                     "type": "alert", "payload": alert.model_dump()
                 })
 
-        # ── 6. Broadcast annotated JPEG ~20 fps ──────────────────────────
-        if now - last_frame_time >= 0.05:   # 20 fps max
+        # ── 6. Broadcast annotated JPEG — adaptive quality ───────────────
+        # Target 15fps over WebSocket. Higher quality (78) since Pi 5 can handle it.
+        # Use JPEG progressive encoding for faster perceived load on client.
+        if now - last_frame_time >= 0.067:   # ~15 fps
             last_frame_time = now
             try:
                 import cv2
-                ok, buf = cv2.imencode(
-                    ".jpg", annotated,
-                    [cv2.IMWRITE_JPEG_QUALITY, 65]   # lower quality = less data = less lag
-                )
+                encode_params = [
+                    cv2.IMWRITE_JPEG_QUALITY,      78,   # good quality, reasonable size
+                    cv2.IMWRITE_JPEG_PROGRESSIVE,   1,   # progressive JPEG — faster display
+                    cv2.IMWRITE_JPEG_OPTIMIZE,      1,   # Huffman optimisation
+                ]
+                ok, buf = cv2.imencode(".jpg", annotated, encode_params)
                 if ok:
                     await ws_manager.broadcast({
                         "type": "frame",
