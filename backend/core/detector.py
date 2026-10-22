@@ -102,8 +102,8 @@ MIN_MASK_PIXELS = 500   # raised for 1080p — at higher res beans produce more 
 #  BROAD HSV DETECTION MASK  (deliberately wide — every coffee
 #  bean colour passes; the bean-gate and grader narrow it down)
 # ─────────────────────────────────────────────────────────────
-DETECT_LOWER = np.array([5,  15,  40], dtype=np.uint8)
-DETECT_UPPER = np.array([45, 200, 240], dtype=np.uint8)
+DETECT_LOWER = np.array([8,  25,  30], dtype=np.uint8)  # H=brown, S=min, V=min
+DETECT_UPPER = np.array([38, 185, 235], dtype=np.uint8)  # H=max brown, S=max, V=max
 
 # Green-mold band
 MOLD_LOWER = np.array([28, 20, 40],  dtype=np.uint8)
@@ -489,7 +489,7 @@ class BeanDetector:
 
             # ── Stage 2: Bean gate ────────────────────────────────────
             bean_score, gate_info = self._bean_gate(cnt, area, norm_frame, hsv_orig)
-            if bean_score < 4:
+            if bean_score < 5:  # require ALL 5 checks — strict bean-only gate
                 # Failed ≥ 2 checks — not a bean
                 continue
 
@@ -588,15 +588,38 @@ class BeanDetector:
     # ─────────────────────────────────────────────────────────
     @staticmethod
     def _gray_world_balance(frame: np.ndarray) -> np.ndarray:
+        """
+        Conservative gray-world white balance.
+        Only applies correction when channel imbalance is significant
+        AND within a reasonable range — prevents blue/gold artifacts
+        on dark conveyor backgrounds.
+        """
         try:
             b, g, r = cv2.split(frame.astype(np.float32))
-            bm = float(b.mean()) or 1.0
-            gm = float(g.mean()) or 1.0
-            rm = float(r.mean()) or 1.0
-            k  = (bm + gm + rm) / 3.0
-            b  = np.clip(b * (k / bm), 0, 255)
-            g  = np.clip(g * (k / gm), 0, 255)
-            r  = np.clip(r * (k / rm), 0, 255)
+            bm = float(b.mean())
+            gm = float(g.mean())
+            rm = float(r.mean())
+
+            # Skip correction if image is very dark (conveyor belt, no beans)
+            # or if channels are already balanced enough
+            avg = (bm + gm + rm) / 3.0
+            if avg < 20:
+                return frame  # too dark — correction would amplify noise
+
+            # Only correct if imbalance exceeds 15% — avoid over-correcting
+            max_ch = max(bm, gm, rm)
+            min_ch = min(bm, gm, rm)
+            if max_ch < 1 or (max_ch - min_ch) / max_ch < 0.15:
+                return frame  # channels already balanced
+
+            # Cap correction factor to avoid extreme shifts (max 1.5x per channel)
+            def safe_scale(ch, cm):
+                factor = min(avg / max(cm, 1), 1.5)
+                return np.clip(ch * factor, 0, 255)
+
+            b = safe_scale(b, bm)
+            g = safe_scale(g, gm)
+            r = safe_scale(r, rm)
             return cv2.merge([b, g, r]).astype(np.uint8)
         except Exception:
             return frame
