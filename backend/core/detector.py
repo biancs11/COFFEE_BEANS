@@ -1,4 +1,4 @@
-"""
+﻿"""
 Coffee Bean Detector v3 — Appearance-Based Multi-Stage Pipeline
 ================================================================
 
@@ -96,7 +96,7 @@ PIXELS_PER_MM: float = 18.0
 #  Minimum mask pixel count before running expensive watershed +
 #  contour pipeline.  Below this → assume no beans present.
 # ─────────────────────────────────────────────────────────────
-MIN_MASK_PIXELS = 300   # ~10×10 px cluster minimum
+MIN_MASK_PIXELS = 500   # raised for 1080p — at higher res beans produce more pixels
 
 # ─────────────────────────────────────────────────────────────
 #  BROAD HSV DETECTION MASK  (deliberately wide — every coffee
@@ -127,12 +127,12 @@ REFLECTION_S_MAX  = 22
 # ─────────────────────────────────────────────────────────────
 MIN_AREA_PX       = 300    # noise / dust
 MAX_AREA_PX       = 90000  # merged cluster (watershed handles, but extra safety)
-MIN_CIRCULARITY   = 0.25   # 4πA/P²  — ovals pass (0.78 for a true circle)
-MIN_SOLIDITY      = 0.52   # area / convex-hull area — crescent shadows fail
+MIN_CIRCULARITY   = 0.35   # stricter — beans are oval/round, not linear
+MIN_SOLIDITY      = 0.60   # stricter — rejects irregular non-bean shapes
 MAX_ASPECT_RATIO  = 3.0    # longer than 3:1 → broken shard, not a bean
-MIN_DIAMETER_MM   = 3.0    # real green/roasted bean ≥ 6mm; allow 3mm for close-up calibration
-MAX_DIAMETER_MM   = 28.0   # >28mm is almost certainly two merged beans or a hand
-MIN_TEXTURE_LAP   = 3.0    # Laplacian variance floor — genuinely featureless blobs (tape, plastic) rejected
+MIN_DIAMETER_MM   = 4.0    # coffee beans are 6-15mm; 4mm allows calibration shots
+MAX_DIAMETER_MM   = 22.0   # >22mm = merged cluster or foreign object, not a single bean
+MIN_TEXTURE_LAP   = 5.0    # raised — rejects smooth plastic, glass, shiny surfaces
 MAX_TEXTURE_LAP   = 900.0  # upper bound — excessive variance = paper/cloth, not a bean surface
 
 # ─────────────────────────────────────────────────────────────
@@ -448,7 +448,7 @@ class BeanDetector:
         norm_frame = self._gray_world_balance(frame)
 
         # ── Stage 1b: Pre-process for mask building ───────────────────
-        blurred  = cv2.bilateralFilter(norm_frame, d=9, sigmaColor=60, sigmaSpace=60)
+        blurred  = cv2.bilateralFilter(norm_frame, d=5, sigmaColor=50, sigmaSpace=50)  # d=5 is 2x faster than d=9 at 1080p
         hsv      = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
         # Keep original (balanced) for colour stats
         hsv_orig = cv2.cvtColor(norm_frame, cv2.COLOR_BGR2HSV)

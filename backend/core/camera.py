@@ -280,8 +280,7 @@ class CameraManager:
 
         self._picam = Picamera2()
 
-        # Use a lower resolution for the capture stream to reduce latency
-        # imx708 native: 4608x2592. For bean detection 1280x720 is plenty.
+        # HD 1080p capture — imx708 supports 1920x1080 at 30fps natively
         capture_w = min(settings.CAMERA_WIDTH,  1920)
         capture_h = min(settings.CAMERA_HEIGHT, 1080)
 
@@ -292,13 +291,13 @@ class CameraManager:
             },
             # Low-res stream for fast preview (optional â€” reduces ISP load)
             lores={
-                "size":   (capture_w // 2, capture_h // 2),
+                "size":   (capture_w // 4, capture_h // 4)  # quarter-res for pre-check speed,
                 "format": "YUV420",
             },
             controls={
                 # Wide frame duration range â€” let AE pick the right exposure
                 # Min 16ms (62fps), max 100ms (10fps in dark)
-                "FrameDurationLimits": (16_666, 100_000),
+                "FrameDurationLimits": (16_666, 66_666)   # 16-66ms: fast AE response,
 
                 # Full auto-exposure and auto-white-balance â€” NO manual override
                 "AeEnable":            True,
@@ -308,9 +307,9 @@ class CameraManager:
 
                 # Image quality
                 "NoiseReductionMode":  2,       # fast noise reduction
-                "Sharpness":           2.0,     # sharper for small bean detail
-                "Contrast":            1.1,     # slight contrast boost
-                "Saturation":          1.2,     # better colour separation for grading
+                "Sharpness":           2.5,     # sharper edges for better contour detection
+                "Contrast":            1.15,    # more contrast for bean/background separation
+                "Saturation":          1.3,     # richer colours for better grade discrimination
                 "Brightness":          0.0,     # neutral brightness (AE handles it)
             },
             buffer_count=4,     # 4-frame buffer â€” reduces dropped frames

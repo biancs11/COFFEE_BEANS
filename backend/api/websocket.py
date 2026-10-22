@@ -1,4 +1,4 @@
-"""
+﻿"""
 WebSocket manager + background detection loop — production hardened.
 
 Changes from dev version:
@@ -268,7 +268,7 @@ async def detection_broadcast_loop() -> None:
 
     # ── Main loop ─────────────────────────────────────────────────────────
     while True:
-        await asyncio.sleep(0.015)
+        await asyncio.sleep(0.008)  # 8ms loop floor — faster reaction to camera movement
 
         now = time.time()
 
@@ -276,7 +276,7 @@ async def detection_broadcast_loop() -> None:
         if app_state.status == SystemStatus.PAUSED:
             _detect_backoff = 0.0
             _detect_errors  = 0
-            if now - last_frame_time >= 0.1:   # ~10 fps while paused
+            if now - last_frame_time >= 0.067:   # ~15 fps while paused — smooth camera movement
                 last_frame_time = now
                 frame = camera_manager.get_frame()
                 if frame is not None:
@@ -375,13 +375,13 @@ async def detection_broadcast_loop() -> None:
         # only (no detection, no DB writes, no ejector firing).
         if not bean_detector.has_beans_quick(frame):
             # Still broadcast the live frame so the dashboard shows video
-            if now - last_frame_time >= 0.1:   # ~10 fps while idle
+            if now - last_frame_time >= 0.067:   # ~15 fps while idle — smooth camera movement
                 last_frame_time = now
                 try:
                     import cv2 as _cv2
                     ok, buf = _cv2.imencode(
                         ".jpg", frame,
-                        [_cv2.IMWRITE_JPEG_QUALITY, 70,
+                        [_cv2.IMWRITE_JPEG_QUALITY, 78,
                          _cv2.IMWRITE_JPEG_PROGRESSIVE, 1]
                     )
                     if ok:
