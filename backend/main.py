@@ -120,7 +120,35 @@ async def lifespan(application: FastAPI):
     # 3. Start detection + broadcast background task
     detection_task = asyncio.create_task(detection_broadcast_loop())
     logger.info("Detection broadcast loop started ✓")
-    logger.info("System ready — waiting for START command")
+
+    # 4. Auto-start the system so camera is live immediately on boot
+    # This means users go straight to the dashboard without pressing Start.
+    # The system can still be stopped/paused from the UI.
+    try:
+        from datetime import datetime as _dt
+        db_auto = SessionLocal()
+        try:
+            db_sess = db_service.create_sorting_session(
+                db_auto,
+                session_name=f"Auto-Start {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            )
+            app_state._db_session_id = db_sess.session_id
+            logger.info(f"Auto-start: DB session #{db_sess.session_id} opened")
+        except Exception as exc:
+            logger.error(f"Auto-start: failed to create DB session: {exc}")
+            app_state._db_session_id = None
+        finally:
+            db_auto.close()
+
+        camera_manager.start()
+        sorting_controller.start_conveyor()
+        sorting_controller.start_compressor()
+        app_state.status     = SystemStatus.RUNNING
+        app_state.start_time = _dt.now()
+        logger.info("System auto-started — camera and detection online ✓")
+    except Exception as exc:
+        logger.warning(f"Auto-start failed — system remains in stopped state: {exc}")
+        logger.info("Use the Start button in the dashboard to start manually")
 
     # ── Hand control to FastAPI ────────────────────────────────────────
     yield

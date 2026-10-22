@@ -121,8 +121,8 @@ export default function CameraFeed({ frame, isRunning, lastBean }) {
         {!isRunning && (
           <div className="camera-offline">
             <span style={{ fontSize: 52, opacity: 0.2 }}>📷</span>
-            <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-              Start system to activate camera
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', textAlign: 'center', padding: '0 16px' }}>
+              Camera inactive — click <strong style={{ color: 'var(--success)' }}>▶ Start</strong> in the top navbar
             </span>
           </div>
         )}
