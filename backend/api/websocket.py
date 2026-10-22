@@ -375,13 +375,13 @@ async def detection_broadcast_loop() -> None:
         # only (no detection, no DB writes, no ejector firing).
         if not bean_detector.has_beans_quick(frame):
             # Still broadcast the live frame so the dashboard shows video
-            if now - last_frame_time >= 0.067:   # ~15 fps while idle — smooth camera movement
+            if now - last_frame_time >= 0.05:   # 20fps idle — real-time camera movement
                 last_frame_time = now
                 try:
                     import cv2 as _cv2
                     ok, buf = _cv2.imencode(
                         ".jpg", frame,
-                        [_cv2.IMWRITE_JPEG_QUALITY, 78,
+                        [_cv2.IMWRITE_JPEG_QUALITY, 85,
                          _cv2.IMWRITE_JPEG_PROGRESSIVE, 1]
                     )
                     if ok:
@@ -583,17 +583,15 @@ async def detection_broadcast_loop() -> None:
                     "type": "alert", "payload": alert.model_dump()
                 })
 
-        # ── 6. Broadcast annotated JPEG — adaptive quality ───────────────
-        # Target 15fps over WebSocket. Higher quality (78) since Pi 5 can handle it.
-        # Use JPEG progressive encoding for faster perceived load on client.
-        if now - last_frame_time >= 0.067:   # ~15 fps
+        # ── 6. Broadcast annotated JPEG — 20fps, high quality ───────────────
+        if now - last_frame_time >= 0.05:   # 20fps
             last_frame_time = now
             try:
                 import cv2
                 encode_params = [
-                    cv2.IMWRITE_JPEG_QUALITY,      78,   # good quality, reasonable size
-                    cv2.IMWRITE_JPEG_PROGRESSIVE,   1,   # progressive JPEG — faster display
-                    cv2.IMWRITE_JPEG_OPTIMIZE,      1,   # Huffman optimisation
+                    cv2.IMWRITE_JPEG_QUALITY,      85,   # high quality for HD
+                    cv2.IMWRITE_JPEG_PROGRESSIVE,   1,
+                    cv2.IMWRITE_JPEG_OPTIMIZE,      1,
                 ]
                 ok, buf = cv2.imencode(".jpg", annotated, encode_params)
                 if ok:
