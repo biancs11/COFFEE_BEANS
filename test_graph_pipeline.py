@@ -168,9 +168,10 @@ def main():
     print("  m - show metrics")
     print("  s - save current frame")
     print("  h - toggle heavy processing")
-    print("  + - increase exposure (+0.2)")
-    print("  - - decrease exposure (-0.2)")
+    print("  + - increase exposure (+0.2) [if too dark]")
+    print("  - - decrease exposure (-0.2) [if too bright/glare]")
     print("  w - cycle AWB mode (incandescent/fluorescent/daylight)")
+    print("  a - cycle AE constraint (highlight/normal/shadows)")
     print()
     
     # Initialize pipeline
@@ -194,9 +195,11 @@ def main():
     vision_paused = False
     frame_count = 0
     last_metrics_time = time.time()
-    current_exposure = 0.8  # Default from camera init
+    current_exposure = -0.5  # Default anti-glare setting
     awb_modes = ["incandescent", "fluorescent", "daylight"]
     current_awb_idx = 0
+    ae_constraint_modes = ["highlight", "normal", "shadows"]
+    current_ae_idx = 0  # Start with highlight (anti-glare)
     
     try:
         while True:
@@ -250,6 +253,12 @@ def main():
                 mode = awb_modes[current_awb_idx]
                 pipeline.set_awb_mode(mode)
                 print(f"AWB mode: {mode}")
+            
+            elif key == ord('a'):
+                current_ae_idx = (current_ae_idx + 1) % len(ae_constraint_modes)
+                mode = ae_constraint_modes[current_ae_idx]
+                pipeline.set_ae_constraint_mode(mode)
+                print(f"AE constraint: {mode}")
             
             # Auto-print metrics every 10 seconds
             if time.time() - last_metrics_time >= 10:

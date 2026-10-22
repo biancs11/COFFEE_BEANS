@@ -314,6 +314,16 @@ async def websocket_endpoint_graph(websocket: WebSocket):
                             "type": "ack",
                             "payload": {"command": "set_awb", "mode": mode, "status": "ok"}
                         })
+                    
+                    elif command == "set_ae_constraint":
+                        # Change AE constraint: {"command": "set_ae_constraint", "mode": "highlight"}
+                        mode = msg.get("mode", "highlight")
+                        pipeline = get_pipeline()
+                        pipeline.set_ae_constraint_mode(mode)
+                        await websocket.send_json({
+                            "type": "ack",
+                            "payload": {"command": "set_ae_constraint", "mode": mode, "status": "ok"}
+                        })
                 
                 except json.JSONDecodeError:
                     pass

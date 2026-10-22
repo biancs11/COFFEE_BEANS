@@ -295,13 +295,13 @@ class CaptureNode(GraphNode):
     
     def _init_picamera(self) -> None:
         """
-        Initialize Raspberry Pi Camera Module 3 with optimized color/exposure.
+        Initialize Raspberry Pi Camera Module 3 with anti-glare exposure.
         
         CRITICAL FIXES:
-        1. Incandescent/Tungsten AWB mode for coffee bean lighting
-        2. Exposure compensation +0.5 to +1.0 so beans don't appear black
-        3. AeConstraintMode=Normal for full dynamic range
-        4. Disable excessive contrast/saturation that causes clipping
+        1. AeConstraintMode=Highlight - prevents overhead light glare
+        2. ExposureValue=-0.5 to -1.0 - reduces overexposure
+        3. Continuous fast autofocus
+        4. Incandescent AWB for coffee bean lighting
         """
         self._picam = Picamera2()
         
@@ -315,32 +315,31 @@ class CaptureNode(GraphNode):
                 # Fast frame duration: 16-50ms
                 "FrameDurationLimits": (16_666, 50_000),
                 
-                # CRITICAL: Auto exposure with NO constraint
-                # Allows full dynamic range so light beans aren't black
+                # CRITICAL: Anti-glare exposure settings
+                # Highlight constraint prevents blown-out whites from overhead lights
                 "AeEnable": True,
-                "AeConstraintMode": controls.AeConstraintModeEnum.Normal,
+                "AeConstraintMode": controls.AeConstraintModeEnum.Highlight,
                 
-                # CRITICAL: Exposure compensation +0.8 (range: -4.0 to +4.0)
-                # Brightens image so light brown beans render correctly
-                "ExposureValue": 0.8,
+                # CRITICAL: Negative exposure compensation to prevent glare
+                # Start at -0.5, can adjust down to -1.5 if still too bright
+                "ExposureValue": -0.5,
                 
-                # CRITICAL: Incandescent/Tungsten white balance
-                # Coffee beans under warm LED/tungsten lighting
+                # CRITICAL: Incandescent white balance for warm LED
                 "AwbEnable": True,
                 "AwbMode": controls.AwbModeEnum.Incandescent,
                 
-                # Continuous autofocus - FAST mode
+                # Continuous fast autofocus
                 "AfMode": controls.AfModeEnum.Continuous,
                 "AfSpeed": controls.AfSpeedEnum.Fast,
                 
-                # Image quality - REDUCE to avoid clipping
+                # Image quality - reduced to avoid clipping
                 "NoiseReductionMode": controls.draft.NoiseReductionModeEnum.Fast,
-                "Sharpness": 1.0,      # Reduced from 1.5 - avoid edge artifacts
-                "Contrast": 1.0,       # Neutral - no clipping
-                "Saturation": 1.0,     # Neutral - true bean colours
+                "Sharpness": 1.0,      # Neutral
+                "Contrast": 1.0,       # Neutral - prevent clipping
+                "Saturation": 1.0,     # Neutral - true colors
                 "Brightness": 0.0,     # Let AE handle it
             },
-            buffer_count=1,  # CRITICAL: Single buffer for minimum latency
+            buffer_count=1,  # CRITICAL: Single buffer for zero latency
         )
         
         self._picam.configure(config)
@@ -351,7 +350,7 @@ class CaptureNode(GraphNode):
         
         logger.info(
             f"[{self.name}] Camera initialized: {self.width}x{self.height} @ {self.target_fps}fps | "
-            f"AWB=Incandescent, ExposureValue=+0.8, buffer=1"
+            f"AeConstraint=Highlight, ExposureValue=-0.5 (anti-glare), AWB=Incandescent"
         )
     
     def _init_opencv(self) -> None:
@@ -369,13 +368,27 @@ class CaptureNode(GraphNode):
         raise RuntimeError("No camera found")
     
     def _grab_frame(self) -> Optional[np.ndarray]:
-        """Grab one frame from hardware"""
+        """
+        Grab one frame from hardware and convert to BGR.
+        
+        CRITICAL: Picamera2 outputs RGB888, but OpenCV/detector expects BGR.
+        Always convert explicitly to prevent green/brown → blue inversion.
+        """
         if self._picam:
-            # picamera2: RGB888 -> BGR for OpenCV
+            # CRITICAL: Picamera2 RGB888 -> OpenCV BGR
             rgb = self._picam.capture_array("main")
-            return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            
+            # Sanity check: verify conversion happened
+            # (RGB and BGR should have different channel orders)
+            if rgb.shape == bgr.shape and not np.array_equal(rgb, bgr):
+                return bgr
+            else:
+                logger.warning(f"[{self.name}] Color conversion may have failed")
+                return bgr
         
         if self._cap:
+            # OpenCV already returns BGR
             self._cap.grab()  # Flush buffer
             ret, frame = self._cap.retrieve()
             return frame if ret else None
@@ -650,19 +663,49 @@ class CameraPipeline:
         
         Args:
             ev: Exposure value (-4.0 to +4.0)
-                Negative = darker, Positive = brighter
+                Negative = darker (anti-glare), Positive = brighter
                 
-        Use this to fix dark/black beans in real-time:
-            pipeline.set_exposure_compensation(1.0)  # Brighten
-            pipeline.set_exposure_compensation(0.5)  # Slightly brighter
-            pipeline.set_exposure_compensation(0.0)  # Reset to neutral
+        Common use cases:
+            -1.5 to -1.0: Strong overhead lights (prevent glare)
+            -0.5 to  0.0: Normal indoor lighting
+             0.0 to +0.5: Dim lighting
+            +0.5 to +1.5: Very dark (beans appear black)
         """
         if hasattr(self.capture_node, '_picam') and self.capture_node._picam:
             try:
                 self.capture_node._picam.set_controls({"ExposureValue": ev})
-                logger.info(f"Exposure compensation set to {ev}")
+                logger.info(f"Exposure compensation set to {ev:+.1f}")
             except Exception as exc:
                 logger.error(f"Failed to set exposure: {exc}")
+    
+    def set_ae_constraint_mode(self, mode_name: str) -> None:
+        """
+        Change auto-exposure constraint mode.
+        
+        Args:
+            mode_name: One of:
+                - "normal": Full dynamic range (default for low light)
+                - "highlight": Protect highlights from glare (DEFAULT - anti-glare)
+                - "shadows": Preserve shadow detail
+        """
+        from libcamera import controls
+        
+        mode_map = {
+            "normal": controls.AeConstraintModeEnum.Normal,
+            "highlight": controls.AeConstraintModeEnum.Highlight,
+            "shadows": controls.AeConstraintModeEnum.Shadows,
+        }
+        
+        if mode_name not in mode_map:
+            logger.error(f"Invalid AE constraint: {mode_name}. Valid: {list(mode_map.keys())}")
+            return
+        
+        if hasattr(self.capture_node, '_picam') and self.capture_node._picam:
+            try:
+                self.capture_node._picam.set_controls({"AeConstraintMode": mode_map[mode_name]})
+                logger.info(f"AE constraint mode set to {mode_name}")
+            except Exception as exc:
+                logger.error(f"Failed to set AE constraint: {exc}")
     
     def set_awb_mode(self, mode_name: str) -> None:
         """
