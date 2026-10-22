@@ -109,7 +109,10 @@ export default function App() {
         <Route path="/landing" element={<Landing />} />
         <Route path="/start"   element={<Landing />} />
 
-        {/* Everything else → dashboard */}
+        {/* All dashboard routes → MainApp with navbar */}
+        <Route path="/dashboard" element={<MainApp theme={theme} onToggleTheme={toggleTheme} />} />
+        <Route path="/admin"     element={<MainApp theme={theme} onToggleTheme={toggleTheme} />} />
+        <Route path="/training"  element={<MainApp theme={theme} onToggleTheme={toggleTheme} />} />
         <Route
           path="/*"
           element={<MainApp theme={theme} onToggleTheme={toggleTheme} />}

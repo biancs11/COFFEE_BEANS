@@ -101,10 +101,10 @@ if [ -n "$PID" ]; then
     sleep 1
 fi
 
-# ── Open launcher page immediately (before server starts) ────
-# The launcher polls /health every 2s and shows a START button
-# on the Pi screen. It will update automatically when server is up.
-LAUNCHER_URL="http://localhost:8000/launcher"
+# ── Open browser directly to dashboard ──────────────────────
+# Opens /dashboard — the main working screen.
+# Launcher is available at /launcher if needed.
+LAUNCHER_URL="http://localhost:8000/dashboard"
 
 _open_browser() {
     local url="$1"
@@ -182,8 +182,8 @@ fi
 echo " [4/4] System started!"
 echo ""
 echo " ============================================"
+echo "   Dashboard : http://localhost:8000/dashboard"
 echo "   Launcher  : http://localhost:8000/launcher"
-echo "   Dashboard : http://localhost:8000"
 echo "   Health    : http://localhost:8000/health"
 echo " ============================================"
 echo ""
