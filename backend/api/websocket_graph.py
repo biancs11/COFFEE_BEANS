@@ -294,6 +294,26 @@ async def websocket_endpoint_graph(websocket: WebSocket):
                                 for node, m in metrics.items()
                             }
                         })
+                    
+                    elif command == "set_exposure":
+                        # Adjust exposure: {"command": "set_exposure", "value": 1.0}
+                        ev = msg.get("value", 0.8)
+                        pipeline = get_pipeline()
+                        pipeline.set_exposure_compensation(ev)
+                        await websocket.send_json({
+                            "type": "ack",
+                            "payload": {"command": "set_exposure", "value": ev, "status": "ok"}
+                        })
+                    
+                    elif command == "set_awb":
+                        # Change AWB mode: {"command": "set_awb", "mode": "incandescent"}
+                        mode = msg.get("mode", "incandescent")
+                        pipeline = get_pipeline()
+                        pipeline.set_awb_mode(mode)
+                        await websocket.send_json({
+                            "type": "ack",
+                            "payload": {"command": "set_awb", "mode": mode, "status": "ok"}
+                        })
                 
                 except json.JSONDecodeError:
                     pass

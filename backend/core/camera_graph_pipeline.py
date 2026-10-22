@@ -221,6 +221,7 @@ class CaptureNode(GraphNode):
         self._picam: Optional[Picamera2] = None
         self._cap: Optional[cv2.VideoCapture] = None
         self._frame_id = 0
+        self._frames_dropped = 0  # Track dropped frames
     
     def _run(self) -> None:
         """Producer loop: grab frames and push to queue"""
@@ -261,13 +262,17 @@ class CaptureNode(GraphNode):
                     }
                 )
                 
-                # Push to queue (non-blocking)
+                # Push to queue (non-blocking - ALWAYS drop old frame)
                 try:
                     self.output_queue.put_nowait(frame)
                 except queue.Full:
-                    # Queue full - drop oldest, add newest
+                    # Queue full - FORCE drop old frame, add newest
+                    # This guarantees detector ALWAYS gets freshest frame
                     try:
-                        self.output_queue.get_nowait()
+                        old_frame = self.output_queue.get_nowait()
+                        self._frames_dropped += 1
+                        if self._frames_dropped % 10 == 0:
+                            logger.warning(f"[{self.name}] Dropped {self._frames_dropped} frames (detector too slow)")
                     except queue.Empty:
                         pass
                     self.output_queue.put_nowait(frame)
@@ -289,7 +294,15 @@ class CaptureNode(GraphNode):
             self._init_opencv()
     
     def _init_picamera(self) -> None:
-        """Initialize Raspberry Pi Camera Module 3"""
+        """
+        Initialize Raspberry Pi Camera Module 3 with optimized color/exposure.
+        
+        CRITICAL FIXES:
+        1. Incandescent/Tungsten AWB mode for coffee bean lighting
+        2. Exposure compensation +0.5 to +1.0 so beans don't appear black
+        3. AeConstraintMode=Normal for full dynamic range
+        4. Disable excessive contrast/saturation that causes clipping
+        """
         self._picam = Picamera2()
         
         # Optimized config for 640x480 @ 30fps
@@ -302,29 +315,44 @@ class CaptureNode(GraphNode):
                 # Fast frame duration: 16-50ms
                 "FrameDurationLimits": (16_666, 50_000),
                 
-                # Auto exposure and white balance
+                # CRITICAL: Auto exposure with NO constraint
+                # Allows full dynamic range so light beans aren't black
                 "AeEnable": True,
+                "AeConstraintMode": controls.AeConstraintModeEnum.Normal,
+                
+                # CRITICAL: Exposure compensation +0.8 (range: -4.0 to +4.0)
+                # Brightens image so light brown beans render correctly
+                "ExposureValue": 0.8,
+                
+                # CRITICAL: Incandescent/Tungsten white balance
+                # Coffee beans under warm LED/tungsten lighting
                 "AwbEnable": True,
+                "AwbMode": controls.AwbModeEnum.Incandescent,
                 
                 # Continuous autofocus - FAST mode
                 "AfMode": controls.AfModeEnum.Continuous,
                 "AfSpeed": controls.AfSpeedEnum.Fast,
                 
-                # Image quality
+                # Image quality - REDUCE to avoid clipping
                 "NoiseReductionMode": controls.draft.NoiseReductionModeEnum.Fast,
-                "Sharpness": 1.5,
-                "Contrast": 1.0,
-                "Saturation": 1.0,
+                "Sharpness": 1.0,      # Reduced from 1.5 - avoid edge artifacts
+                "Contrast": 1.0,       # Neutral - no clipping
+                "Saturation": 1.0,     # Neutral - true bean colours
+                "Brightness": 0.0,     # Let AE handle it
             },
-            buffer_count=2,  # Minimal latency
+            buffer_count=1,  # CRITICAL: Single buffer for minimum latency
         )
         
         self._picam.configure(config)
         self._picam.start()
         
-        # Warm-up
+        # Warm-up for AE/AWB/AF convergence
         time.sleep(1.5)
-        logger.info(f"[{self.name}] Camera initialized: {self.width}x{self.height} @ {self.target_fps}fps")
+        
+        logger.info(
+            f"[{self.name}] Camera initialized: {self.width}x{self.height} @ {self.target_fps}fps | "
+            f"AWB=Incandescent, ExposureValue=+0.8, buffer=1"
+        )
     
     def _init_opencv(self) -> None:
         """Fallback: OpenCV VideoCapture"""
@@ -395,9 +423,10 @@ class VisionNode(GraphNode):
         """Worker loop: process frames from queue"""
         while not self._stop_event.is_set():
             try:
-                # Pull frame from queue (blocking with timeout)
+                # Pull frame from queue (blocking with SHORT timeout)
+                # Short timeout ensures we check stop_event frequently
                 try:
-                    frame = self.input_queue.get(timeout=0.1)
+                    frame = self.input_queue.get(timeout=0.05)  # 50ms max wait
                 except queue.Empty:
                     continue
                 
@@ -415,10 +444,11 @@ class VisionNode(GraphNode):
                 processed_frame.metadata["vision_latency_ms"] = latency_ms
                 processed_frame.metadata["vision_node"] = self.name
                 
-                # Push to output queue
+                # Push to output queue (FORCE drop old if full)
                 try:
                     self.output_queue.put_nowait(processed_frame)
                 except queue.Full:
+                    # Drop old display frame, always send newest
                     try:
                         self.output_queue.get_nowait()
                     except queue.Empty:
@@ -565,9 +595,10 @@ class CameraPipeline:
     ):
         logger.info("Initializing camera graph pipeline...")
         
-        # Create queues
-        self.capture_queue = queue.Queue(maxsize=2)  # Capture -> Vision
-        self.display_queue = queue.Queue(maxsize=2)  # Vision -> Display
+        # CRITICAL: Queue size=1 for ZERO latency
+        # Always drop old frames - only process most recent
+        self.capture_queue = queue.Queue(maxsize=1)  # Capture -> Vision
+        self.display_queue = queue.Queue(maxsize=1)  # Vision -> Display
         
         # Create nodes
         self.capture_node = CaptureNode(
@@ -612,6 +643,63 @@ class CameraPipeline:
     def resume_vision(self) -> None:
         """Resume vision processing"""
         self.vision_node.resume()
+    
+    def set_exposure_compensation(self, ev: float) -> None:
+        """
+        Adjust exposure compensation dynamically.
+        
+        Args:
+            ev: Exposure value (-4.0 to +4.0)
+                Negative = darker, Positive = brighter
+                
+        Use this to fix dark/black beans in real-time:
+            pipeline.set_exposure_compensation(1.0)  # Brighten
+            pipeline.set_exposure_compensation(0.5)  # Slightly brighter
+            pipeline.set_exposure_compensation(0.0)  # Reset to neutral
+        """
+        if hasattr(self.capture_node, '_picam') and self.capture_node._picam:
+            try:
+                self.capture_node._picam.set_controls({"ExposureValue": ev})
+                logger.info(f"Exposure compensation set to {ev}")
+            except Exception as exc:
+                logger.error(f"Failed to set exposure: {exc}")
+    
+    def set_awb_mode(self, mode_name: str) -> None:
+        """
+        Change white balance mode dynamically.
+        
+        Args:
+            mode_name: One of:
+                - "auto": Automatic
+                - "incandescent": Tungsten/warm LED (2800K) - DEFAULT for coffee beans
+                - "tungsten": Same as incandescent
+                - "fluorescent": Cool white (4000K)
+                - "indoor": General indoor
+                - "daylight": Outdoor daylight (5500K)
+                - "cloudy": Overcast (6500K)
+        """
+        from libcamera import controls
+        
+        mode_map = {
+            "auto": controls.AwbModeEnum.Auto,
+            "incandescent": controls.AwbModeEnum.Incandescent,
+            "tungsten": controls.AwbModeEnum.Tungsten,
+            "fluorescent": controls.AwbModeEnum.Fluorescent,
+            "indoor": controls.AwbModeEnum.Indoor,
+            "daylight": controls.AwbModeEnum.Daylight,
+            "cloudy": controls.AwbModeEnum.Cloudy,
+        }
+        
+        if mode_name not in mode_map:
+            logger.error(f"Invalid AWB mode: {mode_name}. Valid: {list(mode_map.keys())}")
+            return
+        
+        if hasattr(self.capture_node, '_picam') and self.capture_node._picam:
+            try:
+                self.capture_node._picam.set_controls({"AwbMode": mode_map[mode_name]})
+                logger.info(f"AWB mode set to {mode_name}")
+            except Exception as exc:
+                logger.error(f"Failed to set AWB mode: {exc}")
     
     def get_metrics(self) -> dict:
         """Get metrics from all nodes"""

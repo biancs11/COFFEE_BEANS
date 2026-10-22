@@ -168,6 +168,9 @@ def main():
     print("  m - show metrics")
     print("  s - save current frame")
     print("  h - toggle heavy processing")
+    print("  + - increase exposure (+0.2)")
+    print("  - - decrease exposure (-0.2)")
+    print("  w - cycle AWB mode (incandescent/fluorescent/daylight)")
     print()
     
     # Initialize pipeline
@@ -191,6 +194,9 @@ def main():
     vision_paused = False
     frame_count = 0
     last_metrics_time = time.time()
+    current_exposure = 0.8  # Default from camera init
+    awb_modes = ["incandescent", "fluorescent", "daylight"]
+    current_awb_idx = 0
     
     try:
         while True:
@@ -228,6 +234,22 @@ def main():
                 heavy_processing = not heavy_processing
                 status = "ON" if heavy_processing else "OFF"
                 print(f"Heavy processing: {status}")
+            
+            elif key == ord('+') or key == ord('='):
+                current_exposure = min(current_exposure + 0.2, 4.0)
+                pipeline.set_exposure_compensation(current_exposure)
+                print(f"Exposure: {current_exposure:+.1f}")
+            
+            elif key == ord('-') or key == ord('_'):
+                current_exposure = max(current_exposure - 0.2, -4.0)
+                pipeline.set_exposure_compensation(current_exposure)
+                print(f"Exposure: {current_exposure:+.1f}")
+            
+            elif key == ord('w'):
+                current_awb_idx = (current_awb_idx + 1) % len(awb_modes)
+                mode = awb_modes[current_awb_idx]
+                pipeline.set_awb_mode(mode)
+                print(f"AWB mode: {mode}")
             
             # Auto-print metrics every 10 seconds
             if time.time() - last_metrics_time >= 10:
