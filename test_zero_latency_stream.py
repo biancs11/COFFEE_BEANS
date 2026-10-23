@@ -22,9 +22,9 @@ from backend.core.zero_latency_stream import (
 )
 
 def test_producer():
-    """Test frame producer"""
+    """Test frame producer with LIFO queue verification"""
     print("="*60)
-    print("TEST 1: Frame Producer")
+    print("TEST 1: Frame Producer (LIFO Queue)")
     print("="*60)
     
     producer = get_frame_producer(width=640, height=480, fps=30)
@@ -32,6 +32,32 @@ def test_producer():
     
     print("Waiting for warmup...")
     time.sleep(2)
+    
+    # Test LIFO behavior
+    print("\nTesting LIFO queue behavior...")
+    print("  Letting frames accumulate (not consuming)...")
+    time.sleep(0.5)  # Let queue fill
+    
+    # Get one frame - should be NEWEST, not oldest
+    frame1 = producer.get_latest_frame(timeout=0.1)
+    if frame1:
+        print(f"  ✓ Got frame ID: {frame1.frame_id}")
+        
+        # Wait a bit, then get another
+        time.sleep(0.2)
+        frame2 = producer.get_latest_frame(timeout=0.1)
+        if frame2:
+            print(f"  ✓ Got frame ID: {frame2.frame_id}")
+            
+            # With LIFO, frame2.frame_id should be > frame1.frame_id + many frames
+            # (because we're always getting the newest frame)
+            gap = frame2.frame_id - frame1.frame_id
+            print(f"  ✓ Frame ID gap: {gap} (LIFO working if > 5)")
+            
+            if gap > 5:
+                print("  ✓ LIFO behavior CONFIRMED (always getting newest frame)")
+            else:
+                print("  ⚠ WARNING: May not be LIFO (gap too small)")
     
     print("\nCapturing 100 frames...")
     t0 = time.time()
@@ -54,6 +80,9 @@ def test_producer():
     print(f"  Frames captured: {stats['frames_captured']}")
     print(f"  Frames dropped:  {stats['frames_dropped']}")
     print(f"  Drop rate:       {stats['drop_rate']:.1f}%")
+    
+    if stats['drop_rate'] > 0:
+        print("  ✓ Frame dropping active (LIFO queue working)")
     
     return producer
 

@@ -268,7 +268,7 @@ async def detection_broadcast_loop() -> None:
 
     # ── Main loop ─────────────────────────────────────────────────────────
     while True:
-        await asyncio.sleep(0.008)  # 8ms loop floor — faster reaction to camera movement
+        await asyncio.sleep(0.001)  # 1ms loop floor — ultra-responsive to camera movement
 
         now = time.time()
 
@@ -276,7 +276,7 @@ async def detection_broadcast_loop() -> None:
         if app_state.status == SystemStatus.PAUSED:
             _detect_backoff = 0.0
             _detect_errors  = 0
-            if now - last_frame_time >= 0.067:   # ~15 fps while paused — smooth camera movement
+            if now - last_frame_time >= 0.016:   # 60fps while paused — instant camera movement response
                 last_frame_time = now
                 frame = camera_manager.get_frame()
                 if frame is not None:
@@ -375,7 +375,7 @@ async def detection_broadcast_loop() -> None:
         # only (no detection, no DB writes, no ejector firing).
         if not bean_detector.has_beans_quick(frame):
             # Still broadcast the live frame so the dashboard shows video
-            if now - last_frame_time >= 0.05:   # 20fps idle — real-time camera movement
+            if now - last_frame_time >= 0.016:   # 60fps idle — instant camera movement response
                 last_frame_time = now
                 try:
                     import cv2 as _cv2
@@ -583,8 +583,8 @@ async def detection_broadcast_loop() -> None:
                     "type": "alert", "payload": alert.model_dump()
                 })
 
-        # ── 6. Broadcast annotated JPEG — 20fps, high quality ───────────────
-        if now - last_frame_time >= 0.05:   # 20fps
+        # ── 6. Broadcast annotated JPEG — 60fps, high quality ───────────────
+        if now - last_frame_time >= 0.016:   # 60fps — instant movement response
             last_frame_time = now
             try:
                 import cv2

@@ -93,36 +93,52 @@ async def system_command(cmd: SystemCommand, db: Session = Depends(get_db)):
             # Continue without DB session — system still runs
             app_state._db_session_id = None
 
-        # Start hardware (errors are logged but do not block the start)
-        try:
-            camera_manager.start()
-        except Exception as exc:
-            logger.warning(f"Camera start warning: {exc}")
-
-        try:
-            sorting_controller.start_conveyor()
-            sorting_controller.start_compressor()
-        except Exception as exc:
-            logger.warning(f"Hardware start warning: {exc}")
-
+        # Set status IMMEDIATELY so UI responds instantly
         app_state.status     = SystemStatus.RUNNING
         app_state.start_time = datetime.now()
 
-        # Log startup alert
-        alert = app_state.add_alert(
-            AlertLevel.INFO, "System Started",
-            "Camera, conveyor, and compressor online.", "system",
-        )
-        if app_state._db_session_id:
+        # Start hardware asynchronously (non-blocking)
+        # Camera initialization happens in background thread
+        async def _start_hardware():
+            """Background task to initialize hardware without blocking HTTP response"""
             try:
-                db_service.create_alert_from_model(db, alert, app_state._db_session_id)
+                # Run camera start in thread pool to avoid blocking event loop
+                loop = _asyncio.get_event_loop()
+                await loop.run_in_executor(None, camera_manager.start)
+                logger.info("Camera started (async)")
             except Exception as exc:
-                logger.error(f"Failed to log start alert: {exc}")
+                logger.warning(f"Camera start warning: {exc}")
 
+            try:
+                # Start conveyor and compressor (fast GPIO operations)
+                sorting_controller.start_conveyor()
+                sorting_controller.start_compressor()
+                logger.info("Conveyor and compressor started (async)")
+            except Exception as exc:
+                logger.warning(f"Hardware start warning: {exc}")
+
+            # Log startup alert after hardware init completes
+            alert = app_state.add_alert(
+                AlertLevel.INFO, "System Started",
+                "Camera, conveyor, and compressor online.", "system",
+            )
+            if app_state._db_session_id:
+                try:
+                    db_local = next(get_db())
+                    db_service.create_alert_from_model(db_local, alert, app_state._db_session_id)
+                    db_local.close()
+                except Exception as exc:
+                    logger.error(f"Failed to log start alert: {exc}")
+
+        # Fire and forget - don't wait for hardware init
+        _asyncio.create_task(_start_hardware())
+
+        # Return immediately - camera will be ready in ~1-2 seconds
         return {
             "ok": True,
             "status": "running",
             "session_id": app_state._db_session_id,
+            "message": "System starting - camera initializing in background",
         }
 
     # ── STOP ──────────────────────────────────────────────────────────────

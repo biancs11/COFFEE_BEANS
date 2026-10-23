@@ -26,10 +26,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from backend.core.config import settings, PROJECT_ROOT
 from backend.api.routes import router
+from backend.api.streaming_routes import router as streaming_router
 from backend.api.websocket import websocket_endpoint, detection_broadcast_loop
 from backend.core import camera_manager, sorting_controller, app_state
 from backend.core.database import init_db, SessionLocal
 from backend.core import db_service
+from backend.core.zero_latency_stream import start_streaming
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -117,11 +119,18 @@ async def lifespan(application: FastAPI):
     finally:
         db.close()
 
-    # 3. Start detection + broadcast background task
+    # 3. Start zero-latency streaming system
+    try:
+        start_streaming()
+        logger.info("Zero-latency streaming system started ✓")
+    except Exception as exc:
+        logger.warning(f"Failed to start streaming system: {exc}")
+    
+    # 4. Start detection + broadcast background task
     detection_task = asyncio.create_task(detection_broadcast_loop())
     logger.info("Detection broadcast loop started ✓")
 
-    # 4. Auto-start the system so camera is live immediately on boot
+    # 5. Auto-start the system so camera is live immediately on boot
     # This means users go straight to the dashboard without pressing Start.
     # The system can still be stopped/paused from the UI.
     try:
@@ -367,6 +376,7 @@ async def health_db():
 # ══════════════════════════════════════════════════════════════════════════
 
 app.include_router(router)
+app.include_router(streaming_router, prefix="/api")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -379,11 +389,16 @@ async def ws_route(websocket: WebSocket):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# MJPEG STREAM  — BUG #4 FIXED: async generator, no blocking sleep
+# MJPEG STREAM  — LEGACY (consider using /api/stream/mjpeg for zero-latency)
 # ══════════════════════════════════════════════════════════════════════════
 
 async def _mjpeg_gen():
-    """Async MJPEG generator — never blocks the event loop."""
+    """
+    Async MJPEG generator with zero artificial delay.
+    
+    Uses LIFO queue from camera_manager - always serves fresh frames.
+    Sleep removed to eliminate streaming lag.
+    """
     while True:
         jpeg = camera_manager.get_jpeg(quality=78)
         if jpeg:
@@ -393,7 +408,9 @@ async def _mjpeg_gen():
                 + jpeg +
                 b"\r\n"
             )
-        await asyncio.sleep(0.033)   # ~30 fps ceiling
+        else:
+            # No frame available yet - brief yield to prevent busy loop
+            await asyncio.sleep(0.001)   # 1ms minimum - camera not ready yet
 
 
 @app.get("/stream", tags=["camera"])

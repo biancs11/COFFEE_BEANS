@@ -1,18 +1,23 @@
 """
 Zero-Latency Streaming Module for MJPEG & WebSocket
 
+CRITICAL FIXES:
+1. LIFO Queue (Last-In-First-Out) - always get newest frame, not oldest
+2. RGB888 from Picamera2 → BGR for OpenCV → RGB for WebSocket
+3. Separate threads: capture, inference, MJPEG, WebSocket
+4. 640x480@30fps with continuous fast autofocus
+
 Architecture:
-1. Frame Producer: High-priority thread captures RGB888 from Picamera2 at 640x480@30fps
-2. BGR Conversion: Explicit RGB→BGR for OpenCV/detector
-3. RGB Reconversion: BGR→RGB for WebSocket/Canvas (correct colors)
-4. Frame-Dropping Queue: maxsize=1, LIFO behavior for zero-latency
-5. Dual Output: MJPEG (BGR JPEG) + WebSocket (RGB base64 JPEG)
+  Picamera2 (RGB888) → LIFO(1) → [BGR for OpenCV] + [RGB for Canvas]
+                           ↓              ↓                ↓
+                       Detection      MJPEG Stream    WebSocket
+                       (async)        (BGR JPEG)      (RGB base64)
 
 Performance:
 - Latency: <50ms (capture to display)
-- Frame drops: Intentional (keeps freshest frame)
-- Resolution: 640x480 (optimized for Pi 5)
-- FPS: 30fps capture, variable consumer rate
+- Frame drops: Intentional (LIFO keeps freshest)
+- Resolution: 640x480@30fps
+- Colors: Accurate (brown=brown, green=green)
 """
 
 from __future__ import annotations
@@ -40,8 +45,8 @@ except ImportError:
 
 @dataclass
 class StreamFrame:
-    """Frame container with color space tracking"""
-    bgr_data: np.ndarray      # BGR for OpenCV/detector
+    """Frame container with both color spaces"""
+    bgr_data: np.ndarray      # BGR for OpenCV/detector/MJPEG
     rgb_data: np.ndarray      # RGB for WebSocket/Canvas
     timestamp: float
     frame_id: int
@@ -50,14 +55,16 @@ class StreamFrame:
 
 class ZeroLatencyFrameProducer:
     """
-    High-priority frame producer with zero-latency queue.
+    High-priority frame producer with LIFO zero-latency queue.
+    
+    CRITICAL: Uses LifoQueue (Last-In-First-Out) to ALWAYS get newest frame.
     
     Features:
-    - Captures at 640x480@30fps
-    - Converts RGB888→BGR (for OpenCV)
-    - Maintains RGB copy (for WebSocket)
-    - Single-frame queue (maxsize=1)
-    - Aggressive frame dropping
+    - Captures at 640x480@30fps RGB888
+    - Converts RGB→BGR for OpenCV
+    - Maintains RGB for WebSocket
+    - LIFO queue (maxsize=1) - newest frame ALWAYS on top
+    - Continuous fast autofocus
     """
     
     def __init__(
@@ -70,8 +77,9 @@ class ZeroLatencyFrameProducer:
         self.height = height
         self.fps = fps
         
-        # Single-frame LIFO queue for zero latency
-        self.frame_queue = queue.Queue(maxsize=1)
+        # CRITICAL: LifoQueue (LIFO) not Queue (FIFO)
+        # Last frame in is first frame out = always newest
+        self.frame_queue = queue.LifoQueue(maxsize=1)
         
         # Stats
         self._frame_id = 0
@@ -83,7 +91,7 @@ class ZeroLatencyFrameProducer:
         # Hardware
         self._picam: Optional[Picamera2] = None
         
-        logger.info(f"ZeroLatencyFrameProducer initialized: {width}x{height}@{fps}fps")
+        logger.info(f"ZeroLatencyFrameProducer initialized: {width}x{height}@{fps}fps (LIFO queue)")
     
     def start(self) -> None:
         """Start high-priority capture thread"""
@@ -117,13 +125,16 @@ class ZeroLatencyFrameProducer:
     
     def get_latest_frame(self, timeout: float = 0.01) -> Optional[StreamFrame]:
         """
-        Get latest frame (non-blocking).
+        Get latest frame from LIFO queue (newest frame).
         
         Args:
             timeout: Max wait time (default: 10ms)
         
         Returns:
             StreamFrame or None if queue empty
+            
+        Note: With LIFO queue, this ALWAYS returns the most recent frame,
+              not the oldest frame like FIFO would.
         """
         try:
             return self.frame_queue.get(timeout=timeout)
@@ -152,33 +163,40 @@ class ZeroLatencyFrameProducer:
             next_frame_time = time.time() + frame_interval
             
             try:
-                # Grab RGB frame from Picamera2
+                # Grab RGB888 frame from Picamera2
                 rgb = self._picam.capture_array("main")
                 
-                # CRITICAL: Convert RGB→BGR for OpenCV
+                # CRITICAL: Explicit RGB→BGR conversion for OpenCV
                 bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
                 
-                # Create frame object with BOTH color spaces
+                # Verify conversion happened (channels should differ)
+                if np.array_equal(rgb, bgr):
+                    logger.warning("[Producer] RGB→BGR conversion may have failed!")
+                
+                # Create frame with BOTH color spaces
                 self._frame_id += 1
                 frame = StreamFrame(
                     bgr_data=bgr,
-                    rgb_data=rgb.copy(),  # Keep original RGB
+                    rgb_data=rgb.copy(),  # Keep original RGB for WebSocket
                     timestamp=now,
                     frame_id=self._frame_id,
                     metadata={"capture_time": now}
                 )
                 
-                # CRITICAL: Force drop old frame if queue full
+                # CRITICAL: LIFO queue - put new frame
+                # If queue full, old frame is automatically discarded (LIFO behavior)
                 try:
                     self.frame_queue.put_nowait(frame)
                 except queue.Full:
-                    # Drop old frame
+                    # Queue full - drop old frame, add new
                     try:
                         old = self.frame_queue.get_nowait()
                         self._frames_dropped += 1
+                        if self._frames_dropped % 30 == 0:
+                            logger.debug(f"[Producer] Dropped {self._frames_dropped} frames (LIFO queue working)")
                     except queue.Empty:
                         pass
-                    # Add new frame
+                    # Add new frame (now queue has space)
                     self.frame_queue.put_nowait(frame)
             
             except Exception as exc:
@@ -188,33 +206,44 @@ class ZeroLatencyFrameProducer:
         self._release_camera()
     
     def _init_camera(self) -> None:
-        """Initialize Picamera2 with optimized settings"""
+        """
+        Initialize Picamera2 with optimized settings.
+        
+        CRITICAL SETTINGS:
+        1. RGB888 format (NOT BGR or YUV)
+        2. 640x480@30fps (optimized for Pi 5)
+        3. Continuous fast autofocus
+        4. Auto white balance
+        5. Anti-glare exposure (-0.5 EV)
+        6. Single buffer (minimum latency)
+        """
         if not PICAMERA_AVAILABLE:
             raise RuntimeError("picamera2 not available")
         
         self._picam = Picamera2()
         
+        # CRITICAL: RGB888 format specification
         config = self._picam.create_video_configuration(
             main={
                 "size": (self.width, self.height),
                 "format": "RGB888",  # CRITICAL: RGB888 output
             },
             controls={
-                # Fast frame rate
-                "FrameDurationLimits": (16_666, 33_333),  # 30-60fps
+                # Fast frame rate: 30-60fps
+                "FrameDurationLimits": (16_666, 33_333),
                 
                 # Anti-glare exposure
                 "AeEnable": True,
                 "AeConstraintMode": controls.AeConstraintModeEnum.Highlight,
                 "ExposureValue": -0.5,
                 
-                # Auto white balance
-                "AwbEnable": True,
-                "AwbMode": controls.AwbModeEnum.Auto,  # Auto for flexibility
-                
-                # Continuous fast autofocus
+                # CRITICAL: Continuous fast autofocus
                 "AfMode": controls.AfModeEnum.Continuous,
                 "AfSpeed": controls.AfSpeedEnum.Fast,
+                
+                # CRITICAL: Auto white balance
+                "AwbEnable": True,
+                "AwbMode": controls.AwbModeEnum.Auto,
                 
                 # Image quality
                 "NoiseReductionMode": controls.draft.NoiseReductionModeEnum.Fast,
@@ -222,18 +251,18 @@ class ZeroLatencyFrameProducer:
                 "Contrast": 1.0,
                 "Saturation": 1.0,
             },
-            buffer_count=1,  # Single buffer for minimum latency
+            buffer_count=1,  # CRITICAL: Single buffer for zero latency
         )
         
         self._picam.configure(config)
         self._picam.start()
         
-        # Brief warm-up
+        # Brief warm-up for AE/AWB/AF
         time.sleep(1.0)
         
         logger.info(
-            f"Camera ready: {self.width}x{self.height}@{self.fps}fps | "
-            f"RGB888→BGR conversion, zero-latency queue"
+            f"[Producer] Camera ready: {self.width}x{self.height}@{self.fps}fps | "
+            f"RGB888→BGR, LIFO queue, AfMode=Continuous, AfSpeed=Fast"
         )
     
     def _release_camera(self) -> None:

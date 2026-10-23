@@ -1,12 +1,12 @@
 ﻿"""
-Raspberry Pi Camera - HD 1080p, true colour, real-time.
+Raspberry Pi Camera - Zero-latency LIFO capture.
 
-Optimised for Raspberry Pi 5 + Camera Module 3 (imx708):
-  - 1920x1080 Full HD
-  - True colour: no over-saturation, no artificial processing
-  - Real-time: 2-frame buffer, minimal latency
-  - Full auto-exposure / auto-white-balance
-  - picamera2 primary, OpenCV fallback
+Optimized for Raspberry Pi 5 + Camera Module 3 (imx708):
+  - 640x480 @ 30fps (optimized for bandwidth)
+  - LIFO frame buffer (maxsize=1) - ALWAYS fresh frames
+  - True colour: RGB888→BGR pipeline
+  - Zero delay: capture thread never blocks
+  - Continuous autofocus enabled
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import logging
 import threading
 import time
 import os
+import queue
 from enum import Enum
 
 import cv2
@@ -46,15 +47,22 @@ class CameraState(str, Enum):
 
 class CameraManager:
     """
-    Thread-safe HD camera wrapper.
-    Provides true-colour 1080p frames with minimal latency.
+    Thread-safe zero-latency camera with LIFO frame buffer.
+    
+    Architecture:
+    - Dedicated capture thread runs at maximum speed (no sleep/throttling)
+    - LIFO queue (maxsize=1) ensures consumers always get newest frame
+    - Old frames are instantly dropped when new ones arrive
+    - No locks on hot path - queue handles thread safety
     """
 
     _FAILURE_THRESHOLD: int = settings.CAMERA_MAX_FAILURES
 
     def __init__(self):
-        self._lock                     = threading.Lock()
-        self._frame: np.ndarray | None = None
+        # LIFO queue - critical for zero latency
+        # maxsize=1 ensures old frames are instantly dropped
+        self._frame_queue: queue.LifoQueue = queue.LifoQueue(maxsize=1)
+        
         self._state                    = CameraState.STOPPED
         self._thread: threading.Thread | None = None
 
@@ -63,6 +71,7 @@ class CameraManager:
         self._fps_timer            = time.time()
         self._consecutive_failures = 0
         self._total_frames         = 0
+        self._dropped_frames       = 0
         self._reconnect_count      = 0
         self._last_error: str      = ""
 
@@ -70,8 +79,6 @@ class CameraManager:
         self._cap: cv2.VideoCapture | None       = None
         self._ip_stream_source: str | None       = None
         self._ip_stream_bytes                    = b""
-
-        self._frame_interval = 1.0 / max(settings.CAMERA_FPS, 1)
 
     # ── Public lifecycle ─────────────────────────────────────
 
@@ -111,14 +118,21 @@ class CameraManager:
             "state":                self._state.value,
             "fps":                  self.fps,
             "total_frames":         self._total_frames,
+            "dropped_frames":       self._dropped_frames,
+            "drop_rate_pct":        round(100 * self._dropped_frames / max(self._total_frames, 1), 1),
             "reconnect_count":      self._reconnect_count,
             "last_error":           self._last_error,
             "consecutive_failures": self._consecutive_failures,
         }
 
     def get_frame(self) -> np.ndarray | None:
-        with self._lock:
-            return self._frame.copy() if self._frame is not None else None
+        """Get the newest frame (non-blocking, LIFO behavior)"""
+        try:
+            # Get newest frame immediately, non-blocking
+            frame = self._frame_queue.get_nowait()
+            return frame.copy()
+        except queue.Empty:
+            return None
 
     def get_jpeg(self, quality: int = 85) -> bytes | None:
         frame = self.get_frame()
@@ -133,6 +147,12 @@ class CameraManager:
     # ── Capture loop ─────────────────────────────────────────
 
     def _run_loop(self) -> None:
+        """
+        Main capture loop - runs at MAXIMUM speed (no throttling).
+        
+        Critical: This loop NEVER sleeps or waits for consumers.
+        If consumers are slow, frames are dropped (LIFO behavior).
+        """
         backoff = settings.CAMERA_RECONNECT_DELAY
 
         while self._state != CameraState.STOPPED:
@@ -141,7 +161,7 @@ class CameraManager:
                 self._state                = CameraState.RUNNING
                 self._consecutive_failures = 0
                 backoff                    = settings.CAMERA_RECONNECT_DELAY
-                logger.info("Camera initialised - entering capture loop")
+                logger.info("Camera initialised - entering zero-latency capture loop")
             except Exception as exc:
                 self._last_error = str(exc)
                 logger.error(f"Camera init failed: {exc}")
@@ -151,23 +171,27 @@ class CameraManager:
                 backoff = min(backoff * 2, 60)
                 continue
 
-            next_frame_time = time.time()
-
+            # ═══ ZERO-LATENCY CAPTURE LOOP ═══
+            # No sleep, no throttling - capture as fast as possible
             while self._state == CameraState.RUNNING:
-                now        = time.time()
-                sleep_time = next_frame_time - now
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-                next_frame_time = time.time() + self._frame_interval
-
                 try:
                     frame = self._read_frame()
                     if frame is None:
                         self._on_failure("read_frame returned None")
                         continue
 
-                    with self._lock:
-                        self._frame = frame
+                    # Put frame in LIFO queue - non-blocking
+                    # If queue is full, drop the old frame immediately
+                    try:
+                        self._frame_queue.put_nowait(frame)
+                    except queue.Full:
+                        # Queue full - drop old frame and replace with new
+                        try:
+                            self._frame_queue.get_nowait()  # Remove old
+                            self._frame_queue.put_nowait(frame)  # Add new
+                            self._dropped_frames += 1
+                        except:
+                            pass
 
                     self._consecutive_failures = 0
                     self._total_frames        += 1
@@ -218,14 +242,14 @@ class CameraManager:
 
     def _init_picam(self) -> None:
         """
-        Initialise Camera Module 3 (imx708) for HD true-colour output.
+        Initialise Camera Module 3 for zero-latency 640x480 capture.
 
-        Key settings:
-        - RGB888 format captured and immediately converted to BGR for OpenCV
-        - NO preprocessing — colours come directly from the ISP
-        - Auto-exposure and auto-white-balance fully enabled
-        - buffer_count=2 for minimum latency (always freshest frame)
-        - AfMode=2 (continuous autofocus) for sharp beans at any distance
+        Key optimizations:
+        - 640x480 resolution (optimized for Pi 5 memory bandwidth)
+        - RGB888 format → BGR conversion (true colors)
+        - buffer_count=1 (minimum buffering for zero lag)
+        - Continuous autofocus enabled
+        - Anti-glare exposure settings
         """
         if self._picam:
             try:
@@ -237,50 +261,49 @@ class CameraManager:
 
         self._picam = Picamera2()
 
-        # 1920x1080 HD — imx708 native support
-        capture_w = min(settings.CAMERA_WIDTH,  1920)
-        capture_h = min(settings.CAMERA_HEIGHT, 1080)
+        # Lock to 640x480 for optimal bandwidth
+        capture_w = 640
+        capture_h = 480
 
         config = self._picam.create_video_configuration(
             main={
                 "size":   (capture_w, capture_h),
-                "format": "RGB888",
+                "format": "RGB888",  # Will be converted to BGR
             },
             controls={
-                # Fast AE: min 16ms (62fps), max 50ms (20fps) — keeps reaction time fast
-                "FrameDurationLimits": (16_666, 50_000),
+                # Continuous fast autofocus - always sharp
+                "AfMode":              2,    # 2 = Continuous
+                "AfSpeed":             1,    # 1 = Fast
 
-                # Full auto — let the ISP handle colour accuracy
+                # Auto-exposure with highlight protection (anti-glare)
                 "AeEnable":            True,
                 "AwbEnable":           True,
-                "AeMeteringMode":      0,    # centre-weighted metering
-                "AeExposureMode":      0,    # normal exposure mode
+                "AeConstraintMode":    1,    # 1 = Highlight (prevent overexposure)
+                "ExposureValue":       -0.5, # Slight underexposure for overhead lights
+                
+                # Fast frame timing - no artificial delays
+                "FrameDurationLimits": (16_666, 33_333),  # 30-60 FPS range
 
-                # Continuous autofocus — always sharp, no manual focus needed
-                # AfMode: 0=manual, 1=auto, 2=continuous
-                "AfMode":              2,
-                "AfSpeed":             1,    # 0=normal, 1=fast
-
-                # Colour: use camera defaults — no artificial boosting
-                # This gives TRUE colours matching the actual bean colour
-                "NoiseReductionMode":  2,    # fast noise reduction
-                "Sharpness":           1.5,  # slight sharpening only
-                "Contrast":            1.0,  # neutral — no change
-                "Saturation":          1.0,  # neutral — true colours
-                "Brightness":          0.0,  # neutral — AE handles it
+                # Minimal processing for speed
+                "NoiseReductionMode":  2,    # Fast
+                "Sharpness":           1.5,
+                "Contrast":            1.0,
+                "Saturation":          1.0,
+                "Brightness":          0.0,
             },
-            # 2 frame buffers only — minimises latency for real-time feel
-            # Pi 5 is fast enough that 2 buffers never overflow
-            buffer_count=2,
+            # CRITICAL: buffer_count=1 for zero latency
+            # Higher values accumulate stale frames
+            buffer_count=1,
         )
 
         self._picam.configure(config)
         self._picam.start()
 
-        # Warm-up: let AE/AWB and autofocus converge
-        logger.info("Camera warming up (2s for AE/AWB/AF convergence)...")
-        time.sleep(2.0)
-        logger.info(f"Camera ready - {capture_w}x{capture_h} HD @ {settings.CAMERA_FPS}fps")
+        # Brief warm-up for AE/AWB/AF (reduced from 2s to 0.5s since we're at 640x480)
+        logger.info("Camera warming up (0.5s for AE/AWB/AF)...")
+        time.sleep(0.5)
+        logger.info(f"Zero-latency camera ready - {capture_w}x{capture_h} @ max FPS")
+        logger.info("LIFO mode: Old frames dropped instantly, always fresh capture")
 
     def _init_opencv(self) -> None:
         if self._cap:
@@ -343,26 +366,39 @@ class CameraManager:
         self._ip_stream_source = None
         self._ip_stream_bytes  = b""
 
-        with self._lock:
-            self._frame = None
+        # Clear the queue
+        try:
+            while True:
+                self._frame_queue.get_nowait()
+        except queue.Empty:
+            pass
 
     # ── Frame read ────────────────────────────────────────────
 
     def _read_frame(self) -> np.ndarray | None:
+        """
+        Read frame from camera - CRITICAL: RGB→BGR conversion here.
+        
+        Picamera2 outputs RGB888, but OpenCV/MJPEG expect BGR.
+        This conversion is MANDATORY for correct colors.
+        """
         if PICAMERA_AVAILABLE and self._picam:
-            # imx708 outputs RGB888 — must convert to BGR for OpenCV
-            # This is the ONLY colour conversion — no other processing
+            # Get RGB888 frame from Picamera2
             rgb = self._picam.capture_array("main")
-            return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            
+            # Convert RGB→BGR (CRITICAL for correct colors)
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            
+            return bgr
 
         if self._ip_stream_source:
             return self._read_ip_frame()
 
         if self._cap is None:
             return None
-        # Flush stale frames — keep buffer current
-        self._cap.grab()
-        ret, frame = self._cap.retrieve()
+        
+        # OpenCV fallback - already in BGR format
+        ret, frame = self._cap.read()
         return frame if ret else None
 
     def _read_ip_frame(self) -> np.ndarray | None:
