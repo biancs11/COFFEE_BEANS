@@ -44,6 +44,7 @@ import cv2
 import numpy as np
 
 from .models import BeanResult, Grade, BinType
+from .color_calibration import ColorCalibration
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ def _resolve_profile_path() -> Path:
 
 TRAINING_DIR = _resolve_training_dir()
 PROFILE_PATH = _resolve_profile_path()
+COLOR_CALIBRATION = ColorCalibration(TRAINING_DIR / "grade_colors.json")
 
 def _resolve_snapshot_dir() -> Path:
     """Auto-captured frames (no beans present) waiting for human labelling."""
@@ -355,6 +357,9 @@ class BeanDetector:
             mask    = cv2.inRange(hsv, DETECT_LOWER, DETECT_UPPER)
             mask    = cv2.bitwise_or(mask, cv2.inRange(hsv, MOLD_LOWER,   MOLD_UPPER))
             mask    = cv2.bitwise_or(mask, cv2.inRange(hsv, BURNT_LOWER,  BURNT_UPPER))
+            calibrated_mask = COLOR_CALIBRATION.candidate_mask(hsv)
+            if calibrated_mask is not None:
+                mask = cv2.bitwise_or(mask, calibrated_mask)
             # Strip shadows and reflections
             s_ch = hsv[:, :, 1];  v_ch = hsv[:, :, 2]
             mask[(s_ch < SHADOW_SAT_MAX) & (v_ch < SHADOW_VAL_MAX)] = 0
@@ -436,6 +441,7 @@ class BeanDetector:
         min_area: int      = MIN_AREA_PX,
         max_area: int      = MAX_AREA_PX,
         sensitivity: float = 0.85,
+        preview_only: bool = False,
     ) -> tuple[list[BeanResult], np.ndarray]:
 
         if frame is None or frame.size == 0:
@@ -460,6 +466,9 @@ class BeanDetector:
 
         bean_mask = cv2.bitwise_or(mask_main, mask_mold)
         bean_mask = cv2.bitwise_or(bean_mask, mask_burnt)
+        calibrated_mask = COLOR_CALIBRATION.candidate_mask(hsv)
+        if calibrated_mask is not None:
+            bean_mask = cv2.bitwise_or(bean_mask, calibrated_mask)
 
         # ── Stage 1d: Shadow / reflection removal from mask ───────────
         s_ch = hsv[:, :, 1]
@@ -489,8 +498,8 @@ class BeanDetector:
 
             # ── Stage 2: Bean gate ────────────────────────────────────
             bean_score, gate_info = self._bean_gate(cnt, area, norm_frame, hsv_orig)
-            if bean_score < 5:  # require ALL 5 checks — strict bean-only gate
-                # Failed ≥ 2 checks — not a bean
+            if bean_score < 4:  # permit one imperfect shape/texture cue
+                # Failed at least two checks — likely background or debris.
                 continue
 
             x, y, w, h = gate_info["bbox"]
@@ -507,8 +516,18 @@ class BeanDetector:
             if roi_mask.sum() == 0:
                 continue
 
-            mh = cv2.mean(roi_hsv, mask=roi_mask)
-            mb = cv2.mean(roi_bgr, mask=roi_mask)
+            # Use interior median pixels for color, reducing background and
+            # fabric contamination along the segmented bean edge.
+            interior_mask = cv2.erode(
+                roi_mask,
+                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+                iterations=1,
+            )
+            color_mask = interior_mask if cv2.countNonZero(interior_mask) >= 20 else roi_mask
+            hsv_pixels = roi_hsv[color_mask > 0]
+            bgr_pixels = roi_bgr[color_mask > 0]
+            mh = np.median(hsv_pixels, axis=0)
+            mb = np.median(bgr_pixels, axis=0)
             hv, sv, vv = float(mh[0]), float(mh[1]), float(mh[2])
             bv, gv, rv = int(mb[0]), int(mb[1]), int(mb[2])
 
@@ -525,8 +544,15 @@ class BeanDetector:
             )
 
             # ── Stage 5: Grade classification ─────────────────────────
+            calibrated_grade = COLOR_CALIBRATION.classify(hv, sv, vv)
+            # Once colors have been registered, discard anything outside the
+            # saved color ranges. This excludes non-beans and uncalibrated hues
+            # from grading, even if a training profile would otherwise label it.
+            if COLOR_CALIBRATION.samples and calibrated_grade is None:
+                continue
             defects      = self._detect_defects(roi_bgr, roi_mask, hv, sv, vv)
-            grade, bin_t, confidence = self._classify(features, hv, sv, vv, defects)
+            calibrated_hex = COLOR_CALIBRATION.samples.get(calibrated_grade) if calibrated_grade else None
+            grade, bin_t, confidence = self._classify(features, hv, sv, vv, defects, calibrated_grade)
             roast        = self._roast_label(hv, sv, vv)
             color_name   = self._color_name(hv, sv, vv)
 
@@ -541,6 +567,8 @@ class BeanDetector:
                 color_g         = gv,
                 color_b         = bv,
                 color_name      = color_name,
+                calibrated_grade= calibrated_grade,
+                calibrated_hex  = calibrated_hex,
                 hue             = round(hv, 1),
                 saturation      = round(sv, 1),
                 brightness      = round(vv, 1),
@@ -564,11 +592,13 @@ class BeanDetector:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                 (255, 255, 255), 2, cv2.LINE_AA,
             )
-            # Reset idle counter — beans are present
-            self.reset_no_bean_streak()
+            # Preview detection must not change the sorter’s idle bookkeeping.
+            if not preview_only:
+                self.reset_no_bean_streak()
         else:
-            # No beans detected — save snapshot for AI learning
-            self._maybe_save_snapshot(frame)
+            # Keep camera preview read-only while the Operator is stopped.
+            if not preview_only:
+                self._maybe_save_snapshot(frame)
             # Overlay idle indicator on annotated frame
             cv2.putText(
                 annotated,
@@ -719,12 +749,19 @@ class BeanDetector:
         features: list[float],
         h: float, s: float, v: float,
         defects: list[str],
+        calibrated_grade: str | None = None,
     ) -> tuple[Grade, BinType, float]:
 
         # Always hard-route severe defects to grade 4 regardless of ML result
         severe = {"Black/Burnt", "Mold", "Pale/Damaged", "Broken"}
         if any(d in severe for d in defects):
             return Grade.GRADE_4, BinType.GRADE_4, self._defect_confidence(defects)
+
+        # Use the registered camera calibration as the source of normal bean
+        # grades. Training profiles are only a fallback when calibration is incomplete.
+        if calibrated_grade:
+            g, b = self._key_to_grade(calibrated_grade)
+            return g, b, 90.0
 
         # ── ML path ──────────────────────────────────────────
         if self.profiles.is_trained:
@@ -924,11 +961,18 @@ class BeanDetector:
 
         # Small neutral grade label
         txt_conf = f"{label} {bean.confidence:.0f}%"
-        ty = max(14, y - 5)
+        color_hex = f"#{bean.color_r:02X}{bean.color_g:02X}{bean.color_b:02X}"
+        txt_color = color_hex
+        ty = max(26, y - 5)
         cv2.putText(
             img, txt_conf,
             (x, ty),
             cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv2.LINE_AA,
+        )
+        cv2.putText(
+            img, txt_color,
+            (x, ty + 14),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.36, (245, 245, 245), 1, cv2.LINE_AA,
         )
 
     # ─────────────────────────────────────────────────────────

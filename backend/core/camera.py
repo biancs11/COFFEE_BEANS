@@ -78,6 +78,8 @@ class CameraManager:
         self._cap: cv2.VideoCapture | None       = None
         self._ip_stream_source: str | None       = None
         self._ip_stream_bytes                    = b""
+        # Warm/cool adjustment: -50 is cooler, +50 is warmer, 0 is neutral.
+        self._color_balance = 0.0
 
     # ── Public lifecycle ─────────────────────────────────────
 
@@ -132,6 +134,28 @@ class CameraManager:
             return frame.copy()
         except queue.Empty:
             return None
+
+    @property
+    def color_balance(self) -> float:
+        return self._color_balance
+
+    def set_color_balance(self, value: float) -> float:
+        """Set warm/cool channel balance in the supported -50..50 range."""
+        self._color_balance = float(max(-50.0, min(50.0, value)))
+        return self._color_balance
+
+    def _apply_color_balance(self, frame: np.ndarray | None) -> np.ndarray | None:
+        """Apply a modest BGR warm/cool correction before display and detection."""
+        if frame is None or self._color_balance == 0:
+            return frame
+
+        adjustment = self._color_balance / 250.0  # up to +/-20% red/blue gain
+        matrix = np.array([
+            [1.0 - adjustment, 0.0, 0.0],  # B
+            [0.0, 1.0, 0.0],              # G
+            [0.0, 0.0, 1.0 + adjustment],  # R
+        ], dtype=np.float32)
+        return cv2.transform(frame, matrix)
 
     def get_jpeg(self, quality: int = 85) -> bytes | None:
         frame = self.get_frame()
@@ -238,10 +262,36 @@ class CameraManager:
     # ── Hardware init ─────────────────────────────────────────
 
     def _initialise(self) -> None:
+        """Try configured and locally attached cameras, then fail with all causes."""
+        failures: list[str] = []
+
+        # An explicitly configured network camera remains the preferred source.
+        if settings.CAMERA_SOURCE.strip():
+            try:
+                self._init_opencv()
+                return
+            except Exception as exc:
+                failures.append(f"configured camera: {exc}")
+                self._release()
+
+        # Picamera2 is the supported path for Raspberry Pi Camera Module 3.
+        # Package presence alone does not prove a camera is connected, so fall
+        # through to OpenCV if construction/configuration/start fails.
         if PICAMERA_AVAILABLE:
-            self._init_picam()
-        else:
-            self._init_opencv()
+            try:
+                self._init_picam()
+                return
+            except Exception as exc:
+                failures.append(f"Picamera2: {exc}")
+                self._release()
+
+        try:
+            self._init_opencv(local_only=True)
+            return
+        except Exception as exc:
+            failures.append(f"local webcam: {exc}")
+
+        raise RuntimeError("; ".join(failures))
 
     def _init_picam(self) -> None:
         """
@@ -273,27 +323,6 @@ class CameraManager:
                 "size":   (capture_w, capture_h),
                 "format": "RGB888",  # Will be converted to BGR
             },
-            controls={
-                # Continuous fast autofocus - always sharp
-                "AfMode":              2,    # 2 = Continuous
-                "AfSpeed":             1,    # 1 = Fast
-
-                # Auto-exposure with highlight protection (anti-glare)
-                "AeEnable":            True,
-                "AwbEnable":           True,  # Camera white balance for natural colors
-                "AeConstraintMode":    1,    # 1 = Highlight (prevent overexposure)
-                "ExposureValue":       -0.5, # Slight underexposure for overhead lights
-                
-                # Fast frame timing - no artificial delays
-                "FrameDurationLimits": (16_666, 33_333),  # 30-60 FPS range
-
-                # Minimal processing for speed
-                "NoiseReductionMode":  2,    # Fast
-                "Sharpness":           1.5,
-                "Contrast":            1.0,
-                "Saturation":          1.0,
-                "Brightness":          0.0,
-            },
             # CRITICAL: buffer_count=1 for zero latency
             # Higher values accumulate stale frames
             buffer_count=1,
@@ -302,19 +331,36 @@ class CameraManager:
         self._picam.configure(config)
         self._picam.start()
 
+        # Controls vary across libcamera and Picamera2 versions. Apply each
+        # independently so an unsupported optional control cannot disable
+        # the otherwise compatible Camera Module 3 stream.
+        controls = {
+            "AfMode": 2, "AfSpeed": 1,
+            "AeEnable": True, "AwbEnable": True,
+            "AeConstraintMode": 1, "ExposureValue": -0.5,
+            "FrameDurationLimits": (16_666, 33_333),
+            "NoiseReductionMode": 2, "Sharpness": 1.5,
+            "Contrast": 1.0, "Saturation": 1.0, "Brightness": 0.0,
+        }
+        for name, value in controls.items():
+            try:
+                self._picam.set_controls({name: value})
+            except Exception as exc:
+                logger.debug("Ignoring unsupported Picamera2 control %s: %s", name, exc)
+
         # Brief warm-up for AE/AWB/AF (reduced from 2s to 0.5s since we're at 640x480)
         logger.info("Camera warming up (0.5s for AE/AWB/AF)...")
         time.sleep(0.5)
         logger.info(f"Zero-latency camera ready - {capture_w}x{capture_h} @ max FPS")
         logger.info("LIFO mode: Old frames dropped instantly, always fresh capture")
 
-    def _init_opencv(self) -> None:
+    def _init_opencv(self, local_only: bool = False) -> None:
         if self._cap:
             self._cap.release()
             self._cap = None
 
         source = settings.CAMERA_SOURCE.strip()
-        if source:
+        if source and not local_only:
             import urllib.request
             try:
                 req = urllib.request.urlopen(source, timeout=5)
@@ -330,8 +376,9 @@ class CameraManager:
 
         self._ip_stream_source = None
 
-        # Scan indices 0-35 — Pi 5 CSI camera is at higher indices
-        for idx in range(0, 36):
+        # CSI Module 3 should be opened through Picamera2/libcamera. Keep a
+        # bounded index scan for laptop and USB webcams to avoid long stalls.
+        for idx in range(0, 10):
             try:
                 cap = cv2.VideoCapture(idx)
                 if not cap.isOpened():
@@ -351,7 +398,7 @@ class CameraManager:
             except Exception as exc:
                 logger.debug(f"Camera index {idx} failed: {exc}")
                 continue
-        raise RuntimeError("No camera device found at indices 0-35")
+        raise RuntimeError("No local camera found at indices 0-9")
 
     def _release(self) -> None:
         if PICAMERA_AVAILABLE and self._picam:
@@ -385,17 +432,17 @@ class CameraManager:
         Picamera2's RGB888 capture_array is laid out as BGR bytes.
         """
         if PICAMERA_AVAILABLE and self._picam:
-            return self._picam.capture_array("main")
+            return self._apply_color_balance(self._picam.capture_array("main"))
 
         if self._ip_stream_source:
-            return self._read_ip_frame()
+            return self._apply_color_balance(self._read_ip_frame())
 
         if self._cap is None:
             return None
         
         # OpenCV fallback - already in BGR format
         ret, frame = self._cap.read()
-        return frame if ret else None
+        return self._apply_color_balance(frame if ret else None)
 
     def _read_ip_frame(self) -> np.ndarray | None:
         import urllib.request

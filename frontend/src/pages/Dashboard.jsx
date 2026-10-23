@@ -1,5 +1,6 @@
 import CameraFeed from '../components/CameraFeed'
 import { GradeDonut, GradeBarChart } from '../components/Charts'
+import { useNavigate } from 'react-router-dom'
 
 /* ── Grade config ─────────────────────────────────────────── */
 const GRADES = [
@@ -9,13 +10,25 @@ const GRADES = [
   { key: 'grade4', label: 'Grade 4 – Defect',  color: 'var(--defective)', fill: 'fill-defective', bin: 4 },
 ]
 
-export default function Dashboard({ stats, lastBean, frame }) {
+export default function Dashboard({ stats, lastBean, frame, calibrationReady }) {
+  const navigate = useNavigate()
   const sc        = stats.sort_counts || {}
   const total     = stats.beans_processed || 0
   const isRunning = stats.status === 'running'
 
   return (
     <div className="page">
+
+      {!calibrationReady && (
+        <div className="neu-card" style={{ padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', border: '1px solid rgba(245,158,11,0.35)' }}>
+          <span style={{ color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
+            Calibrate one bean from each grade before starting sorting.
+          </span>
+          <button className="neu-btn neu-btn-sm" onClick={() => navigate('/calibration')} style={{ color: 'var(--warning)', fontWeight: 700 }}>
+            Open calibration
+          </button>
+        </div>
+      )}
 
       {/* ── Hero: camera left | grade distribution right ── */}
       <div className="dashboard-hero">

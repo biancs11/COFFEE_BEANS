@@ -29,9 +29,11 @@ from backend.api.routes import router
 from backend.api.streaming_routes import router as streaming_router
 from backend.api.websocket import websocket_endpoint, detection_broadcast_loop
 from backend.core import camera_manager, sorting_controller, app_state
+from backend.core.browser_camera import browser_camera
 from backend.core.database import init_db, SessionLocal
+from backend.core.db_models import ColorCalibrationSample
+from backend.core.detector import COLOR_CALIBRATION
 from backend.core import db_service
-from backend.core.zero_latency_stream import start_streaming
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -92,6 +94,20 @@ async def lifespan(application: FastAPI):
     # 1. Initialise database — creates tables if they don't exist
     logger.info("Initialising database …")
     init_db()
+    db_migrate = SessionLocal()
+    try:
+        saved_colors = db_migrate.query(ColorCalibrationSample).all()
+        if saved_colors:
+            COLOR_CALIBRATION.samples = {row.grade: row.color_hex for row in saved_colors}
+            COLOR_CALIBRATION.save()
+        else:
+            legacy_colors = COLOR_CALIBRATION.load()
+            for grade, color_hex in legacy_colors.items():
+                db_migrate.add(ColorCalibrationSample(grade=grade, color_hex=color_hex))
+            if legacy_colors:
+                db_migrate.commit()
+    finally:
+        db_migrate.close()
     logger.info("Database ready ✓")
 
     # 2. Load persisted settings into AppState
@@ -119,42 +135,22 @@ async def lifespan(application: FastAPI):
     finally:
         db.close()
 
-    # 3. Start zero-latency streaming system
-    try:
-        start_streaming()
-        logger.info("Zero-latency streaming system started ✓")
-    except Exception as exc:
-        logger.warning(f"Failed to start streaming system: {exc}")
-    
-    # 4. Start detection + broadcast background task
+    # 3. Start detection + broadcast background task
     detection_task = asyncio.create_task(detection_broadcast_loop())
     logger.info("Detection broadcast loop started ✓")
 
-    # 5. Auto-start the system so camera is live immediately on boot
-    # This means users go straight to the dashboard without pressing Start.
-    # The system can still be stopped/paused from the UI.
+    # Camera is available for operator calibration, but sorting outputs remain
+    # disabled until all four persisted grade colors have been sampled.
     try:
-        from datetime import datetime as _dt
-        db_auto = SessionLocal()
-        try:
-            db_sess = db_service.create_sorting_session(
-                db_auto,
-                session_name=f"Auto-Start {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            )
-            app_state._db_session_id = db_sess.session_id
-            logger.info(f"Auto-start: DB session #{db_sess.session_id} opened")
-        except Exception as exc:
-            logger.error(f"Auto-start: failed to create DB session: {exc}")
-            app_state._db_session_id = None
-        finally:
-            db_auto.close()
-
         camera_manager.start()
-        sorting_controller.start_conveyor()
-        sorting_controller.start_compressor()
-        app_state.status     = SystemStatus.RUNNING
-        app_state.start_time = _dt.now()
-        logger.info("System auto-started — camera and detection online ✓")
+        COLOR_CALIBRATION.load()
+        app_state.calibration_ready = COLOR_CALIBRATION.complete
+        app_state.status = SystemStatus.STOPPED
+        app_state._db_session_id = None
+        logger.info(
+            "Camera ready; saved four-grade calibration %s; sorting outputs remain off",
+            "loaded" if app_state.calibration_ready else "incomplete",
+        )
     except Exception as exc:
         logger.warning(f"Auto-start failed — system remains in stopped state: {exc}")
         logger.info("Use the Start button in the dashboard to start manually")
@@ -342,7 +338,7 @@ async def health_check():
         "status":       "ok" if app_state.status.value != "error" else "degraded",
         "system_state": app_state.status.value,
         "uptime_s":     uptime,
-        "camera_fps":   camera_manager.fps,
+        "camera_fps":   browser_camera.fps if browser_camera.is_available else camera_manager.fps,
         "cpu_temp_c":   cpu_temp,
         "mem_mb":       round(mem_mb, 1),
         "cpu_pct":      cpu_pct,

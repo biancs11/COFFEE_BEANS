@@ -28,8 +28,17 @@ from ..core import (
 )
 from ..core import db_service
 from ..core.config import settings
+from ..core.browser_camera import browser_camera
 
 logger = logging.getLogger(__name__)
+
+
+def _camera_fps() -> float:
+    return browser_camera.fps if browser_camera.is_available else camera_manager.fps
+
+
+def _camera_state() -> str:
+    return "running" if browser_camera.is_available else camera_manager.state.value
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -223,6 +232,7 @@ async def detection_broadcast_loop() -> None:
 
     last_stats_time  = time.time()
     last_frame_time  = time.time()
+    last_browser_sequence = 0
     _frame_counter   = 0
     _detect_backoff  = 0.0        # exponential back-off on repeated detect errors
     _detect_errors   = 0
@@ -312,7 +322,14 @@ async def detection_broadcast_loop() -> None:
             _detect_errors  = 0
             if now - last_frame_time >= 0.016:   # 60fps while paused — instant camera movement response
                 last_frame_time = now
-                frame = camera_manager.get_frame()
+                if browser_camera.is_available:
+                    browser_frame = browser_camera.get_newer_than(last_browser_sequence)
+                    if browser_frame is not None:
+                        frame, last_browser_sequence = browser_frame
+                    else:
+                        frame = None
+                else:
+                    frame = camera_manager.get_frame()
                 if frame is not None:
                     try:
                         import cv2
@@ -326,7 +343,7 @@ async def detection_broadcast_loop() -> None:
                                 "type": "frame",
                                 "payload": {
                                     "data": base64.b64encode(bytes(buf)).decode(),
-                                    "fps":  camera_manager.fps,
+                                    "fps":  _camera_fps(),
                                     "paused": True,
                                 },
                             })
@@ -353,8 +370,8 @@ async def detection_broadcast_loop() -> None:
                         "last_bean":        None,
                         "air_pressure_mpa": getattr(app_state, "_pressure_mpa", 0.0),
                         "conveyor_rpm":     app_state.settings.conveyor_rpm,
-                        "camera_fps":       camera_manager.fps,
-                        "camera_state":     camera_manager.state.value,
+                        "camera_fps":       _camera_fps(),
+                        "camera_state":     _camera_state(),
                         "cpu_temp_c":       0.0,
                         "active_alerts":    app_state.active_alert_count(),
                         "valve_fires":      sorting_controller.valve_fires,
@@ -383,14 +400,21 @@ async def detection_broadcast_loop() -> None:
         session_id = getattr(app_state, "_db_session_id", None)
 
         # ── 1. Grab frame ────────────────────────────────────────────────
-        frame = camera_manager.get_frame()
+        if browser_camera.is_available:
+            browser_frame = browser_camera.get_newer_than(last_browser_sequence)
+            if browser_frame is not None:
+                frame, last_browser_sequence = browser_frame
+            else:
+                frame = None
+        else:
+            frame = camera_manager.get_frame()
         if frame is None:
             # Camera reconnecting — alert once and wait
             if _ok_to_alert("camera_no_frame"):
                 alert = app_state.add_alert(
                     AlertLevel.WARNING,
                     "No Camera Frame",
-                    f"Camera state: {camera_manager.state.value} — waiting for frame.",
+                    f"Camera state: {_camera_state()} — waiting for frame.",
                     "camera",
                 )
                 if session_id:
@@ -423,7 +447,7 @@ async def detection_broadcast_loop() -> None:
                             "type": "frame",
                             "payload": {
                                 "data":   base64.b64encode(bytes(buf)).decode(),
-                                "fps":    camera_manager.fps,
+                                "fps":    _camera_fps(),
                                 "idle":   True,    # tells UI conveyor is empty
                             },
                         })
@@ -450,8 +474,8 @@ async def detection_broadcast_loop() -> None:
                         "last_bean":        None,
                         "air_pressure_mpa": getattr(app_state, "_pressure_mpa", 0.0),
                         "conveyor_rpm":     app_state.settings.conveyor_rpm,
-                        "camera_fps":       camera_manager.fps,
-                        "camera_state":     camera_manager.state.value,
+                        "camera_fps":       _camera_fps(),
+                        "camera_state":     _camera_state(),
                         "cpu_temp_c":       0.0,
                         "active_alerts":    app_state.active_alert_count(),
                         "valve_fires":      sorting_controller.valve_fires,
@@ -633,7 +657,7 @@ async def detection_broadcast_loop() -> None:
                         "type": "frame",
                         "payload": {
                             "data": base64.b64encode(bytes(buf)).decode(),
-                            "fps":  camera_manager.fps,
+                            "fps":  _camera_fps(),
                         },
                     })
             except Exception as exc:
@@ -701,8 +725,8 @@ async def detection_broadcast_loop() -> None:
                     "last_bean":         last_bean.model_dump() if last_bean else None,
                     "air_pressure_mpa":  app_state._pressure_mpa,
                     "conveyor_rpm":      app_state.settings.conveyor_rpm,
-                    "camera_fps":        camera_manager.fps,
-                    "camera_state":      camera_manager.state.value,
+                    "camera_fps":        _camera_fps(),
+                    "camera_state":      _camera_state(),
                     "cpu_temp_c":        cpu_temp,
                     "active_alerts":     app_state.active_alert_count(),
                     "valve_fires":       sorting_controller.valve_fires,
@@ -741,8 +765,8 @@ async def _push_initial_stats(ws: WebSocket) -> None:
                 "last_bean":         last_bean.model_dump() if last_bean else None,
                 "air_pressure_mpa":  getattr(app_state, "_pressure_mpa", 0.0),
                 "conveyor_rpm":      app_state.settings.conveyor_rpm,
-                "camera_fps":        camera_manager.fps,
-                "camera_state":      camera_manager.state.value,
+                "camera_fps":        _camera_fps(),
+                "camera_state":      _camera_state(),
                 "cpu_temp_c":        0.0,
                 "active_alerts":     app_state.active_alert_count(),
                 "valve_fires":       sorting_controller.valve_fires,
@@ -754,3 +778,4 @@ async def _push_initial_stats(ws: WebSocket) -> None:
         }, default=str))
     except Exception as exc:
         logger.debug(f"Initial stats push failed: {exc}")
+

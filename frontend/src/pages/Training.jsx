@@ -98,7 +98,7 @@ function ProgressBar({ value, max, color }) {
 
 // ── Drop zone for one grade ───────────────────────────────────
 
-function GradeUploadZone({ grade, sampleCount, imageMeta, onUpload, onClear, onDeleteOne, uploading }) {
+function GradeUploadZone({ grade, sampleCount, imageMeta, calibrationHex, onDeleteHex, onUpload, onClear, onDeleteOne, uploading }) {
   const inputRef  = useRef(null)
   const [dragOver, setDragOver] = useState(false)
 
@@ -141,6 +141,22 @@ function GradeUploadZone({ grade, sampleCount, imageMeta, onUpload, onClear, onD
       </div>
 
       <ProgressBar value={sampleCount} max={50} color={grade.color} />
+
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, marginTop: 10,
+        padding: '7px 9px', borderRadius: 'var(--r-sm)', background: 'var(--bg-deep)',
+        fontSize: '0.68rem', minHeight: 34,
+      }}>
+        <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>CALIBRATION HEX</span>
+        {calibrationHex ? <>
+          <span aria-hidden="true" style={{ width: 16, height: 16, borderRadius: 4, background: calibrationHex, border: '1px solid var(--border)' }} />
+          <code style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{calibrationHex}</code>
+          <button className="neu-btn neu-btn-sm" style={{ marginLeft: 'auto', color: 'var(--danger)', fontSize: '0.64rem', padding: '2px 8px' }}
+            onClick={() => onDeleteHex(grade.key)} title={`Delete the saved ${grade.label} calibration color`}>
+            Delete hex
+          </button>
+        </> : <span style={{ color: 'var(--text-muted)' }}>No color saved</span>}
+      </div>
 
       {/* Drop area */}
       <div
@@ -247,22 +263,35 @@ function GradeUploadZone({ grade, sampleCount, imageMeta, onUpload, onClear, onD
 export default function Training({ onToast }) {
   const [status,     setStatus]     = useState(null)
   const [images,     setImages]     = useState({})
+  const [calibrationColors, setCalibrationColors] = useState({})
   const [loading,    setLoading]    = useState(true)
+  const [loadError,  setLoadError]  = useState('')
   const [training,   setTraining]   = useState(false)
   const [uploading,  setUploading]  = useState({})   // { grade_key: bool }
   const [trainLog,   setTrainLog]   = useState(null)
 
   // ── Fetch status + image list ──────────────────────────────
   const refresh = useCallback(async () => {
+    setLoading(true)
+    setLoadError('')
     try {
-      const [st, imgs] = await Promise.all([
+      const [statusResult, imagesResult] = await Promise.allSettled([
         api.getTrainingStatus(),
         api.getTrainingImages(),
       ])
-      setStatus(st)
-      setImages(imgs)
-    } catch (e) {
-      onToast?.(`Could not load training status: ${e.message}`, 'danger')
+      const calibrationResult = await Promise.allSettled([api.getColorCalibration()])
+      const errors = []
+      if (statusResult.status === 'fulfilled') setStatus(statusResult.value)
+      else errors.push(`status: ${statusResult.reason?.message || 'request failed'}`)
+      if (imagesResult.status === 'fulfilled') setImages(imagesResult.value)
+      else errors.push(`images: ${imagesResult.reason?.message || 'request failed'}`)
+      if (calibrationResult[0].status === 'fulfilled') setCalibrationColors(calibrationResult[0].value.samples || {})
+      else errors.push(`calibration colors: ${calibrationResult[0].reason?.message || 'request failed'}`)
+      if (errors.length) {
+        const message = `Could not load training ${errors.join('; ')}`
+        setLoadError(message)
+        onToast?.(message, 'danger')
+      }
     } finally {
       setLoading(false)
     }
@@ -283,6 +312,17 @@ export default function Training({ onToast }) {
       setUploading(prev => ({ ...prev, [gradeKey]: false }))
     }
   }, [onToast, refresh])
+
+  const handleDeleteHex = useCallback(async (gradeKey) => {
+    if (!window.confirm(`Delete the saved calibration hex color for ${gradeKey.replace('grade', 'Grade ')}?`)) return
+    try {
+      const result = await api.deleteColorCalibration(gradeKey)
+      setCalibrationColors(result.samples || {})
+      onToast?.(`Deleted ${gradeKey.replace('grade', 'Grade ')} calibration hex`, 'warning')
+    } catch (e) {
+      onToast?.(`Could not delete calibration hex: ${e.message}`, 'danger')
+    }
+  }, [onToast])
 
   // ── Delete one image ───────────────────────────────────────
   const handleDeleteOne = useCallback(async (gradeKey, filename) => {
@@ -361,6 +401,18 @@ export default function Training({ onToast }) {
 
   return (
     <div className="page">
+
+      {loadError && (
+        <div role="alert" style={{
+          marginBottom: 16, padding: '12px 16px', borderRadius: 'var(--r-md)',
+          color: 'var(--danger)', background: 'rgba(239,68,68,0.08)',
+          border: '1px solid rgba(239,68,68,0.2)', display: 'flex',
+          alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        }}>
+          <span>{loadError}. The page will still show any data that loaded.</span>
+          <button className="neu-btn neu-btn-sm" onClick={refresh}>Retry</button>
+        </div>
+      )}
 
       {/* ── Page header ── */}
       <div className="page-header">
@@ -537,6 +589,8 @@ export default function Training({ onToast }) {
             grade={grade}
             sampleCount={sampleCounts[grade.key]?.n ?? sampleCounts[grade.key] ?? 0}
             imageMeta={images[grade.key] || []}
+            calibrationHex={calibrationColors[grade.key]}
+            onDeleteHex={handleDeleteHex}
             onUpload={handleUpload}
             onClear={handleClear}
             onDeleteOne={handleDeleteOne}

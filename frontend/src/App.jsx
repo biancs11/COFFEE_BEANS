@@ -6,10 +6,12 @@ import Landing        from './pages/Landing'
 import Dashboard      from './pages/Dashboard'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminLogin     from './components/AdminLogin'
+import Calibration    from './pages/Calibration'
 import Training       from './pages/Training'
 import { useWebSocket }  from './hooks/useWebSocket'
 import { useToast }      from './hooks/useToast'
 import { useAdminAuth }  from './hooks/useAdminAuth'
+import { api } from './services/api'
 
 /* ── Theme helpers ─────────────────────────────────────────── */
 function getInitialTheme() {
@@ -33,6 +35,37 @@ function MainApp({ theme, onToggleTheme }) {
   const { isAuthenticated, username, checking, login, logout } = useAdminAuth()
   const location  = useLocation()
   const isAdmin   = location.pathname === '/admin'
+  const isCalibration = location.pathname === '/calibration'
+  const isTraining = location.pathname === '/training'
+  const [calibrationReady, setCalibrationReady] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    api.getColorCalibration()
+      .then(result => { if (active) setCalibrationReady(result.ready) })
+      .catch(() => { if (active) setCalibrationReady(false) })
+    return () => { active = false }
+  }, [])
+
+  const adminPage = checking ? (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
+      <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+        <div className="admin-login-spinner" style={{ margin: '0 auto 12px' }} />
+        Verifying session…
+      </div>
+    </div>
+  ) : isAuthenticated ? (
+    <AdminDashboard stats={stats} lastBean={lastBean} username={username} onLogout={logout} />
+  ) : (
+    <AdminLogin onSuccess={login} />
+  )
+
+  const page = isAdmin ? adminPage
+    : isCalibration
+      ? <Calibration onComplete={() => setCalibrationReady(true)} />
+      : isTraining
+        ? <Training onToast={addToast} />
+      : <Dashboard stats={stats} lastBean={lastBean} frame={frame} alerts={alerts} onToast={addToast} calibrationReady={calibrationReady} />
 
   return (
     <div className="app-shell">
@@ -62,30 +95,7 @@ function MainApp({ theme, onToggleTheme }) {
           </div>
         )}
 
-        <Routes>
-          <Route path="/admin" element={
-            /* ── Auth gate ── */
-            checking ? (
-              /* Verifying stored token... */
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
-                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                  <div className="admin-login-spinner" style={{ margin: '0 auto 12px' }} />
-                  Verifying session…
-                </div>
-              </div>
-            ) : isAuthenticated ? (
-              <AdminDashboard stats={stats} lastBean={lastBean} username={username} onLogout={logout} />
-            ) : (
-              <AdminLogin onSuccess={login} />
-            )
-          } />
-          <Route path="/training" element={
-            <Training onToast={addToast} />
-          } />
-          <Route path="/*" element={
-            <Dashboard stats={stats} lastBean={lastBean} frame={frame} alerts={alerts} onToast={addToast} />
-          } />
-        </Routes>
+        {page}
       </div>
 
       <Toast toasts={toasts} onRemove={removeToast} />

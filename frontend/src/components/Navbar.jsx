@@ -15,6 +15,7 @@ export default function Navbar({ status, onToast, theme, onToggleTheme, currentP
   const navigate = useNavigate()
   const isAdmin    = currentPath === '/admin'
   const isTraining = currentPath === '/training'
+  const isCalibration = currentPath === '/calibration'
   const [time,             setTime]             = useState('')
   const [date,             setDate]             = useState('')
   const [loading,          setLoading]          = useState(false)
@@ -103,15 +104,22 @@ export default function Navbar({ status, onToast, theme, onToggleTheme, currentP
       {/* ── CENTRE: View switcher ── */}
       <div className="navbar-view-switcher">
         <button
-          className={`navbar-view-btn${!isAdmin && !isTraining ? ' active' : ''}`}
+          className={`navbar-view-btn${!isAdmin && !isTraining && !isCalibration ? ' active' : ''}`}
           onClick={() => navigate('/dashboard')}
         >
           📷 Operator
         </button>
         <button
+          className={`navbar-view-btn${isCalibration ? ' active' : ''}`}
+          onClick={() => navigate('/calibration')}
+          title="Calibrate grade colors using camera samples"
+        >
+          🎯 Color Calibration
+        </button>
+        <button
           className={`navbar-view-btn${isTraining ? ' active' : ''}`}
           onClick={() => navigate('/training')}
-          title="Upload example images and train the AI detector"
+          title="Manage training examples and train the detector"
         >
           🧠 Training
         </button>

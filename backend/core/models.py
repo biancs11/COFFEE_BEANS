@@ -55,6 +55,8 @@ class BeanResult(BaseModel):
     color_g: int
     color_b: int
     color_name: str            # e.g. "Uniform Brown"
+    calibrated_grade: Optional[str] = None
+    calibrated_hex: Optional[str] = None
     hue: float
     saturation: float
     brightness: float
@@ -163,6 +165,7 @@ class AppState:
     _bean_counter: int = 0
     _fps_actual: float = 0.0
     _pressure_mpa: float = 0.0
+    calibration_ready: bool = False
 
     def next_bean_id(self) -> int:
         self._bean_counter += 1

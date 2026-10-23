@@ -44,11 +44,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import cv2
+import numpy as np
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
+from ..core.db_models import ColorCalibrationSample
 from ..core import (
     app_state, camera_manager, bean_detector, sorting_controller,
     SystemCommand, SortingSettings, SystemStats,
@@ -57,6 +61,9 @@ from ..core import (
 from ..core import db_service
 from ..core.config import settings as _cfg
 from ..core.models import SortCounts
+from ..core.color_calibration import sample_hex as _sample_hex
+from ..core.detector import COLOR_CALIBRATION
+from ..core.browser_camera import browser_camera
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["system"])
@@ -77,6 +84,8 @@ async def system_command(cmd: SystemCommand, db: Session = Depends(get_db)):
 
     # ── START ─────────────────────────────────────────────────────────────
     if action == "start":
+        if not app_state.calibration_ready or not COLOR_CALIBRATION.complete:
+            raise HTTPException(409, "Complete all four camera color calibration samples before starting")
         if app_state.status == SystemStatus.RUNNING:
             return {"ok": True, "status": "already running", "session_id": _sid()}
 
@@ -204,6 +213,8 @@ async def system_command(cmd: SystemCommand, db: Session = Depends(get_db)):
             return {"ok": True, "status": "already running"}
         if app_state.status not in (SystemStatus.PAUSED, SystemStatus.STOPPED):
             return {"ok": True, "status": app_state.status.value}
+        if not app_state.calibration_ready or not COLOR_CALIBRATION.complete:
+            raise HTTPException(409, "Complete all four camera color calibration samples before starting")
         app_state.status = SystemStatus.RUNNING
         try:
             sorting_controller.start_conveyor()
@@ -296,7 +307,7 @@ async def get_stats():
         last_bean=last_bean,
         air_pressure_mpa=app_state._pressure_mpa,
         conveyor_rpm=app_state.settings.conveyor_rpm,
-        camera_fps=camera_manager.fps,
+        camera_fps=browser_camera.fps if browser_camera.is_available else camera_manager.fps,
         cpu_temp_c=cpu_temp,
         active_alerts=app_state.active_alert_count(),
     ).model_dump()
@@ -631,6 +642,95 @@ async def calibrate(pixels_per_mm: float, db: Session = Depends(get_db)):
     return {"ok": True, "pixels_per_mm": pixels_per_mm}
 
 
+@router.get("/calibration/status")
+async def color_calibration_status(db: Session = Depends(get_db)):
+    rows = db.query(ColorCalibrationSample).all()
+    if rows:
+        samples = {row.grade: row.color_hex for row in rows}
+        COLOR_CALIBRATION.samples = samples
+        COLOR_CALIBRATION.save()
+    else:
+        # Migrate colors saved before this database-backed table existed.
+        samples = COLOR_CALIBRATION.load()
+        for grade, color_hex in samples.items():
+            db.add(ColorCalibrationSample(grade=grade, color_hex=color_hex))
+        if samples:
+            db.commit()
+    if not camera_manager.is_running:
+        camera_manager.start()
+    return {
+        "ready": app_state.calibration_ready and COLOR_CALIBRATION.complete,
+        "samples": samples,
+        "grades": ["grade1", "grade2", "grade3", "grade4"],
+    }
+
+
+@router.post("/calibration/sample")
+async def capture_color_sample(payload: dict = Body(...), db: Session = Depends(get_db)):
+    grade = payload.get("grade")
+    supplied_hex = payload.get("hex")
+    if supplied_hex is not None:
+        try:
+            samples = COLOR_CALIBRATION.set_sample(grade, str(supplied_hex))
+            color_hex = str(supplied_hex).upper()
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, str(exc))
+        app_state.calibration_ready = False
+        _save_calibration_row(db, grade, color_hex)
+        return {"grade": grade, "hex": color_hex, "samples": samples}
+
+    frame = camera_manager.get_frame()
+    if frame is None:
+        raise HTTPException(503, "Camera frame is not ready yet")
+    try:
+        x, y = float(payload["x"]), float(payload["y"])
+        color_hex = _sample_hex(frame, x, y)
+        samples = COLOR_CALIBRATION.set_sample(grade, color_hex)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.exception("Calibration sample capture failed")
+        raise HTTPException(503, f"Could not capture calibration color: {exc}")
+    app_state.calibration_ready = False
+    _save_calibration_row(db, grade, color_hex)
+    return {"grade": grade, "hex": color_hex, "samples": samples}
+
+
+def _save_calibration_row(db: Session, grade: str, color_hex: str) -> None:
+    row = db.get(ColorCalibrationSample, grade)
+    if row:
+        row.color_hex = color_hex
+    else:
+        db.add(ColorCalibrationSample(grade=grade, color_hex=color_hex))
+    db.commit()
+
+
+@router.delete("/calibration/sample/{grade}")
+async def delete_color_sample(grade: str, db: Session = Depends(get_db)):
+    if grade not in ("grade1", "grade2", "grade3", "grade4"):
+        raise HTTPException(400, "Grade must be grade1, grade2, grade3, or grade4")
+    row = db.get(ColorCalibrationSample, grade)
+    if row is None:
+        raise HTTPException(404, f"No calibration color is saved for {grade}")
+    db.delete(row)
+    db.commit()
+    COLOR_CALIBRATION.samples.pop(grade, None)
+    COLOR_CALIBRATION.save()
+    app_state.calibration_ready = False
+    return {"ok": True, "grade": grade, "samples": dict(COLOR_CALIBRATION.samples)}
+
+
+@router.post("/calibration/complete")
+async def complete_color_calibration():
+    COLOR_CALIBRATION.load()
+    if not COLOR_CALIBRATION.complete:
+        missing = [g for g in ("grade1", "grade2", "grade3", "grade4")
+                   if g not in COLOR_CALIBRATION.samples]
+        raise HTTPException(409, f"Missing calibration samples: {', '.join(missing)}")
+    app_state.calibration_ready = True
+    return {"ok": True, "ready": True, "samples": COLOR_CALIBRATION.samples}
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # ADMIN AUTH  — simple token-based login for the Admin Dashboard
 # Token is a signed HMAC-SHA256 of "admin:<timestamp>" with the password
@@ -694,6 +794,51 @@ async def camera_snapshot():
     if jpeg is None:
         raise HTTPException(503, "Camera not available")
     return StreamingResponse(io.BytesIO(jpeg), media_type="image/jpeg")
+
+
+@router.post("/camera/browser-frame")
+async def submit_browser_camera_frame(request: Request):
+    """Accept Operator frames; return read-only bean/color results while stopped."""
+    data = await request.body()
+    if not data or len(data) > 4 * 1024 * 1024:
+        raise HTTPException(413, "Camera frame must be between 1 byte and 4 MB")
+    frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(400, "Invalid JPEG camera frame")
+    if frame.shape[1] > 1280 or frame.shape[0] > 720:
+        scale = min(640 / frame.shape[1], 480 / frame.shape[0])
+        size = (round(frame.shape[1] * scale), round(frame.shape[0] * scale))
+        frame = cv2.resize(frame, size, interpolation=cv2.INTER_AREA)
+
+    if app_state.status == SystemStatus.STOPPED:
+        beans, _ = await run_in_threadpool(
+            bean_detector.detect,
+            frame,
+            min(app_state.settings.min_bean_area_px, 150),
+            max(app_state.settings.max_bean_area_px, 90_000),
+            app_state.settings.sensitivity,
+            True,
+        )
+        return {
+            "ok": True,
+            "preview": True,
+            "beans": [bean.model_dump(mode="json") for bean in beans],
+        }
+
+    sequence = browser_camera.submit(frame)
+    return {"ok": True, "sequence": sequence}
+
+
+@router.get("/camera/color-balance")
+async def get_camera_color_balance():
+    """Return the current warm/cool camera color adjustment."""
+    return {"value": camera_manager.color_balance, "min": -50, "max": 50}
+
+
+@router.post("/camera/color-balance")
+async def set_camera_color_balance(value: float = Body(..., embed=True, ge=-50, le=50)):
+    """Set warm/cool balance; 0 is neutral, positive values are warmer."""
+    return {"value": camera_manager.set_color_balance(value)}
 
 
 # ══════════════════════════════════════════════════════════════════════════

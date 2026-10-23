@@ -251,3 +251,12 @@ class SystemSettings(Base):
             f"<SystemSettings rpm={self.conveyor_rpm} "
             f"sensitivity={self.sensitivity} ppm={self.pixels_per_mm}>"
         )
+
+
+class ColorCalibrationSample(Base):
+    """One currently registered camera color for each coffee grade."""
+    __tablename__ = "color_calibration_samples"
+
+    grade = Column(String(16), primary_key=True)
+    color_hex = Column(String(7), nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

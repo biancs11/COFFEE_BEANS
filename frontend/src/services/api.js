@@ -6,11 +6,14 @@
 
 const BASE = import.meta.env.VITE_API_URL || ''
 
-async function request(method, path, body) {
+async function request(method, path, body, timeoutMs) {
   const opts = {
     method,
     headers: { 'Content-Type': 'application/json' },
   }
+  // Bound the initial Training screen reads so a stalled backend cannot leave
+  // that page in its loading state forever. Other API calls may take longer.
+  if (timeoutMs) opts.signal = AbortSignal.timeout(timeoutMs)
   if (body !== undefined) opts.body = JSON.stringify(body)
 
   const res = await fetch(`${BASE}${path}`, opts)
@@ -60,14 +63,29 @@ export const api = {
 
   // ── Calibration ──────────────────────────────────────────────
   calibrate: (ppm) => request('POST', `/api/calibrate/pixels_per_mm?pixels_per_mm=${ppm}`),
+  getColorCalibration: () => request('GET', '/api/calibration/status'),
+  deleteColorCalibration: (grade) => request('DELETE', `/api/calibration/sample/${encodeURIComponent(grade)}`),
+  captureColorSample: (grade, x, y) => request('POST', '/api/calibration/sample', { grade, x, y }),
+  captureColorHex: (grade, hex) => request('POST', '/api/calibration/sample', { grade, hex }),
+  completeColorCalibration: () => request('POST', '/api/calibration/complete'),
 
   // ── Camera ───────────────────────────────────────────────────
   snapshotUrl: () => `${BASE}/api/camera/snapshot?t=${Date.now()}`,
+  getCameraColorBalance: () => request('GET', '/api/camera/color-balance'),
+  setCameraColorBalance: (value) => request('POST', '/api/camera/color-balance', { value }),
   streamUrl:   () => `${BASE}/stream`,
+  submitBrowserFrame: (blob) => fetch(`${BASE}/api/camera/browser-frame`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'image/jpeg' },
+    body: blob,
+  }).then(async res => {
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`)
+    return res.json()
+  }),
 
   // ── Training / example images ────────────────────────────────
-  getTrainingStatus: () => request('GET', '/api/training/status'),
-  getTrainingImages: () => request('GET', '/api/training/images'),
+  getTrainingStatus: () => request('GET', '/api/training/status', undefined, 8000),
+  getTrainingImages: () => request('GET', '/api/training/images', undefined, 8000),
 
   /** Upload one image for the given grade (grade1..grade4).
    *  @param {string} grade  'grade1' | 'grade2' | 'grade3' | 'grade4'
