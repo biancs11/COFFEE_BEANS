@@ -4,7 +4,7 @@ Raspberry Pi Camera - Zero-latency LIFO capture.
 Optimized for Raspberry Pi 5 + Camera Module 3 (imx708):
   - 640x480 @ 30fps (optimized for bandwidth)
   - LIFO frame buffer (maxsize=1) - ALWAYS fresh frames
-  - True colour: RGB888→BGR pipeline
+  - True colour: Picamera2 RGB888 arrays passed to OpenCV in BGR byte order
   - Zero delay: capture thread never blocks
   - Continuous autofocus enabled
 """
@@ -249,7 +249,7 @@ class CameraManager:
 
         Key optimizations:
         - 640x480 resolution (optimized for Pi 5 memory bandwidth)
-        - RGB888 format → BGR conversion (true colors)
+        - RGB888 format (Picamera2 array is already in BGR byte order)
         - buffer_count=1 (minimum buffering for zero lag)
         - Continuous autofocus enabled
         - Anti-glare exposure settings
@@ -280,7 +280,7 @@ class CameraManager:
 
                 # Auto-exposure with highlight protection (anti-glare)
                 "AeEnable":            True,
-                "AwbEnable":           False, # Preserve captured colors without auto white balance
+                "AwbEnable":           True,  # Camera white balance for natural colors
                 "AeConstraintMode":    1,    # 1 = Highlight (prevent overexposure)
                 "ExposureValue":       -0.5, # Slight underexposure for overhead lights
                 
@@ -380,19 +380,12 @@ class CameraManager:
 
     def _read_frame(self) -> np.ndarray | None:
         """
-        Read frame from camera - CRITICAL: RGB→BGR conversion here.
-        
-        Picamera2 outputs RGB888, but OpenCV/MJPEG expect BGR.
-        This conversion is MANDATORY for correct colors.
+        Read frame from camera in OpenCV's BGR channel order.
+
+        Picamera2's RGB888 capture_array is laid out as BGR bytes.
         """
         if PICAMERA_AVAILABLE and self._picam:
-            # Get RGB888 frame from Picamera2
-            rgb = self._picam.capture_array("main")
-            
-            # Convert RGB→BGR (CRITICAL for correct colors)
-            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-            
-            return bgr
+            return self._picam.capture_array("main")
 
         if self._ip_stream_source:
             return self._read_ip_frame()

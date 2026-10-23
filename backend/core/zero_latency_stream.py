@@ -3,12 +3,12 @@ Zero-Latency Streaming Module for MJPEG & WebSocket
 
 CRITICAL FIXES:
 1. LIFO Queue (Last-In-First-Out) - always get newest frame, not oldest
-2. RGB888 from Picamera2 → BGR for OpenCV → RGB for WebSocket
+2. RGB888 from Picamera2 (BGR byte order) → OpenCV; RGB conversion only for WebSocket
 3. Separate threads: capture, inference, MJPEG, WebSocket
 4. 640x480@30fps with continuous fast autofocus
 
 Architecture:
-  Picamera2 (RGB888) → LIFO(1) → [BGR for OpenCV] + [RGB for Canvas]
+  Picamera2 (RGB888/BGR bytes) → LIFO(1) → [BGR for OpenCV] + [RGB for WebSocket]
                            ↓              ↓                ↓
                        Detection      MJPEG Stream    WebSocket
                        (async)        (BGR JPEG)      (RGB base64)
@@ -61,8 +61,8 @@ class ZeroLatencyFrameProducer:
     
     Features:
     - Captures at 640x480@30fps RGB888
-    - Converts RGB→BGR for OpenCV
-    - Maintains RGB for WebSocket
+    - Uses BGR-ordered RGB888 arrays for OpenCV
+    - Converts to RGB for WebSocket clients
     - LIFO queue (maxsize=1) - newest frame ALWAYS on top
     - Continuous fast autofocus
     """
@@ -162,21 +162,15 @@ class ZeroLatencyFrameProducer:
             next_frame_time = time.time() + frame_interval
             
             try:
-                # Grab RGB888 frame from Picamera2
-                rgb = self._picam.capture_array("main")
-                
-                # CRITICAL: Explicit RGB→BGR conversion for OpenCV
-                bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-                
-                # Verify conversion happened (channels should differ)
-                if np.array_equal(rgb, bgr):
-                    logger.warning("[Producer] RGB→BGR conversion may have failed!")
+                # Picamera2's RGB888 capture_array is laid out as BGR bytes.
+                bgr = self._picam.capture_array("main")
+                rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
                 
                 # Create frame with BOTH color spaces
                 self._frame_id += 1
                 frame = StreamFrame(
                     bgr_data=bgr,
-                    rgb_data=rgb.copy(),  # Keep original RGB for WebSocket
+                    rgb_data=rgb,  # RGB copy for WebSocket clients
                     timestamp=now,
                     frame_id=self._frame_id,
                     metadata={"capture_time": now}
@@ -246,8 +240,9 @@ class ZeroLatencyFrameProducer:
                 "AfMode": controls.AfModeEnum.Continuous,
                 "AfSpeed": controls.AfSpeedEnum.Fast,
                 
-                # Preserve captured colors without auto white balance.
-                "AwbEnable": False,
+                # Auto white balance keeps neutral objects neutral under LED lighting.
+                "AwbEnable": True,
+                "AwbMode": controls.AwbModeEnum.Auto,
                 
                 # Image quality
                 "NoiseReductionMode": controls.draft.NoiseReductionModeEnum.Fast,
