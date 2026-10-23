@@ -333,11 +333,6 @@ function drawIdleFrame() {
   const h = cameraCtx.canvas.height;
   cameraCtx.fillStyle = '#0a0e1a';
   cameraCtx.fillRect(0, 0, w, h);
-  // Grid lines
-  cameraCtx.strokeStyle = 'rgba(37,99,235,0.08)';
-  cameraCtx.lineWidth = 1;
-  for (let x = 0; x < w; x += 40) { cameraCtx.beginPath(); cameraCtx.moveTo(x, 0); cameraCtx.lineTo(x, h); cameraCtx.stroke(); }
-  for (let y = 0; y < h; y += 40) { cameraCtx.beginPath(); cameraCtx.moveTo(0, y); cameraCtx.lineTo(w, y); cameraCtx.stroke(); }
   // Center text
   cameraCtx.fillStyle = 'rgba(100,116,139,0.5)';
   cameraCtx.font = '14px Inter, sans-serif';
@@ -354,29 +349,6 @@ function drawCameraFrame(bean) {
   // Conveyor background
   cameraCtx.fillStyle = '#0d1520';
   cameraCtx.fillRect(0, 0, w, h);
-
-  // Draw LED lighting effect
-  const grad = cameraCtx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, 'rgba(200,220,255,0.04)');
-  grad.addColorStop(0.5, 'rgba(200,220,255,0.08)');
-  grad.addColorStop(1, 'rgba(200,220,255,0.02)');
-  cameraCtx.fillStyle = grad;
-  cameraCtx.fillRect(0, 0, w, h);
-
-  // Grid
-  cameraCtx.strokeStyle = 'rgba(37,99,235,0.1)';
-  cameraCtx.lineWidth = 0.5;
-  for (let x = 0; x < w; x += 50) { cameraCtx.beginPath(); cameraCtx.moveTo(x, 0); cameraCtx.lineTo(x, h); cameraCtx.stroke(); }
-  for (let y = 0; y < h; y += 50) { cameraCtx.beginPath(); cameraCtx.moveTo(0, y); cameraCtx.lineTo(w, y); cameraCtx.stroke(); }
-
-  // Scan line
-  const scanY = ((Date.now() / 1500) % 1) * h;
-  const scanGrad = cameraCtx.createLinearGradient(0, scanY - 20, 0, scanY + 20);
-  scanGrad.addColorStop(0, 'transparent');
-  scanGrad.addColorStop(0.5, 'rgba(37,99,235,0.35)');
-  scanGrad.addColorStop(1, 'transparent');
-  cameraCtx.fillStyle = scanGrad;
-  cameraCtx.fillRect(0, scanY - 20, w, 40);
 
   // Add new bean to animation list
   beanAnimBeans.push({ bean, x: -30, y: h / 2, speed: rand(3, 6), opacity: 1 });
@@ -430,7 +402,7 @@ function drawCameraFrame(bean) {
   });
 
   // Frame corners
-  const cornerColor = 'rgba(37,99,235,0.6)';
+  const cornerColor = 'rgba(55,145,85,0.65)';
   const cs = 16;
   cameraCtx.strokeStyle = cornerColor;
   cameraCtx.lineWidth = 2;

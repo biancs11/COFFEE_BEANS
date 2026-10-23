@@ -108,17 +108,11 @@ def annotate_frame_for_display(bgr_frame, detection_result: Optional[dict]):
         grade = bean["grade"]
         confidence = bean["confidence"]
         
-        # Color by grade
-        colors = {
-            "grade1": (0, 255, 0),    # Green
-            "grade2": (0, 255, 255),  # Yellow
-            "grade3": (0, 165, 255),  # Orange
-            "grade4": (0, 0, 255),    # Red
-        }
-        color = colors.get(grade, (255, 255, 255))
+        # Keep a thin, neutral outline so the bean's color stays visible.
+        color = (55, 145, 85)  # muted green in BGR
         
         # Draw bounding box
-        cv2.rectangle(annotated, (x, y), (x+w, y+h), color, 2)
+        cv2.rectangle(annotated, (x, y), (x+w, y+h), color, 1, cv2.LINE_AA)
         
         # Draw label
         label = f"{grade} {confidence:.0%}"
@@ -129,7 +123,8 @@ def annotate_frame_for_display(bgr_frame, detection_result: Optional[dict]):
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
             color,
-            2
+            1,
+            cv2.LINE_AA,
         )
     
     return annotated

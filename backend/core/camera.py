@@ -59,9 +59,8 @@ class CameraManager:
     _FAILURE_THRESHOLD: int = settings.CAMERA_MAX_FAILURES
 
     def __init__(self):
-        # LIFO queue - critical for zero latency
-        # maxsize=1 ensures old frames are instantly dropped
-        self._frame_queue: queue.LifoQueue = queue.LifoQueue(maxsize=1)
+        # A single-slot FIFO with drop-oldest writes always holds the newest frame.
+        self._frame_queue: queue.Queue = queue.Queue(maxsize=1)
         
         self._state                    = CameraState.STOPPED
         self._thread: threading.Thread | None = None
@@ -180,18 +179,8 @@ class CameraManager:
                         self._on_failure("read_frame returned None")
                         continue
 
-                    # Put frame in LIFO queue - non-blocking
-                    # If queue is full, drop the old frame immediately
-                    try:
-                        self._frame_queue.put_nowait(frame)
-                    except queue.Full:
-                        # Queue full - drop old frame and replace with new
-                        try:
-                            self._frame_queue.get_nowait()  # Remove old
-                            self._frame_queue.put_nowait(frame)  # Add new
-                            self._dropped_frames += 1
-                        except:
-                            pass
+                    # Replace any queued frame so a slow consumer never sees stale video.
+                    self._put_latest_frame(frame)
 
                     self._consecutive_failures = 0
                     self._total_frames        += 1
@@ -208,6 +197,20 @@ class CameraManager:
                 backoff = min(backoff * 2, 60)
 
         self._release()
+
+    def _put_latest_frame(self, frame: np.ndarray) -> None:
+        """Insert without blocking, evicting the stale slot if necessary."""
+        while True:
+            try:
+                self._frame_queue.put_nowait(frame)
+                return
+            except queue.Full:
+                try:
+                    self._frame_queue.get_nowait()
+                    self._dropped_frames += 1
+                except queue.Empty:
+                    # A consumer freed the slot between Full and get_nowait.
+                    continue
 
     def _on_failure(self, reason: str) -> None:
         self._consecutive_failures += 1

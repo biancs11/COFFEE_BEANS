@@ -95,14 +95,9 @@ def _detect_beans_blocking(frame, frame_number: int):
         annotated = frame.copy()
         for bean in beans:
             x, y, w, h = bean.bbox
-            color = {
-                "grade1": (0, 255, 0),    # green
-                "grade2": (0, 255, 255),  # yellow
-                "grade3": (0, 165, 255),  # orange
-                "grade4": (0, 0, 255),    # red
-            }.get(bean.grade, (255, 255, 255))
-            
-            cv2.rectangle(annotated, (x, y), (x+w, y+h), color, 2)
+            color = (55, 145, 85)  # thin muted green outline in BGR
+
+            cv2.rectangle(annotated, (x, y), (x+w, y+h), color, 1, cv2.LINE_AA)
             cv2.putText(
                 annotated,
                 f"{bean.grade} {bean.confidence:.0%}",
@@ -110,7 +105,8 @@ def _detect_beans_blocking(frame, frame_number: int):
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 color,
-                2
+                1,
+                cv2.LINE_AA,
             )
         
         proc_ms = (time.time() - t0) * 1000

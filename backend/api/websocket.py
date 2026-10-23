@@ -15,6 +15,7 @@ import asyncio
 import base64
 import json
 import logging
+import queue
 import time
 from datetime import datetime
 from typing import Optional
@@ -84,6 +85,9 @@ class ConnectionManager:
         self._max    = max_connections
         self._active: list[WebSocket] = []
         self._lock   = asyncio.Lock()
+        self._send_lock = asyncio.Lock()
+        self._latest_frame: queue.Queue = queue.Queue(maxsize=1)
+        self._frame_sender: Optional[asyncio.Task] = None
 
     @property
     def count(self) -> int:
@@ -121,14 +125,44 @@ class ConnectionManager:
     async def broadcast(self, data: dict) -> None:
         if not self._active:
             return
+        if data.get("type") == "frame":
+            # A slow WebSocket client must not build a backlog of old camera frames.
+            while True:
+                try:
+                    self._latest_frame.put_nowait(data)
+                    break
+                except queue.Full:
+                    try:
+                        self._latest_frame.get_nowait()
+                    except queue.Empty:
+                        continue
+            if self._frame_sender is None or self._frame_sender.done():
+                self._frame_sender = asyncio.create_task(self._send_latest_frames())
+            return
+
         msg  = json.dumps(data, default=str)
-        dead: list[WebSocket] = []
-        for ws in list(self._active):
+        await self._send_to_clients(msg)
+
+    async def _send_latest_frames(self) -> None:
+        """Send the newest pending frame and discard frames superseded in transit."""
+        while True:
             try:
-                await ws.send_text(msg)
-            except Exception as exc:
-                logger.debug(f"WS send failed ({exc}) — queuing disconnect")
-                dead.append(ws)
+                data = self._latest_frame.get_nowait()
+            except queue.Empty:
+                self._frame_sender = None
+                return
+            msg = json.dumps(data, default=str)
+            await self._send_to_clients(msg)
+
+    async def _send_to_clients(self, msg: str) -> None:
+        dead: list[WebSocket] = []
+        async with self._send_lock:
+            for ws in list(self._active):
+                try:
+                    await ws.send_text(msg)
+                except Exception as exc:
+                    logger.debug(f"WS send failed ({exc}) — queuing disconnect")
+                    dead.append(ws)
         for ws in dead:
             await self.disconnect(ws)
 

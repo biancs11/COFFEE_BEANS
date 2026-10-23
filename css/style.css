@@ -1039,7 +1039,7 @@ body {
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--primary), transparent);
+  background: linear-gradient(90deg, transparent, rgba(55,145,85,0.35), transparent);
   animation: scan 2s ease-in-out infinite;
   pointer-events: none;
 }

@@ -103,7 +103,7 @@ MIN_MASK_PIXELS = 500   # raised for 1080p — at higher res beans produce more 
 #  bean colour passes; the bean-gate and grader narrow it down)
 # ─────────────────────────────────────────────────────────────
 DETECT_LOWER = np.array([8,  25,  30], dtype=np.uint8)  # H=brown, S=min, V=min
-DETECT_UPPER = np.array([38, 185, 235], dtype=np.uint8)  # H=max brown, S=max, V=max
+DETECT_UPPER = np.array([38, 185, 215], dtype=np.uint8)  # H=max brown, S=max, V=max (reduced from 235 to exclude bright reflections)
 
 # Green-mold band
 MOLD_LOWER = np.array([28, 20, 40],  dtype=np.uint8)
@@ -118,8 +118,8 @@ BURNT_UPPER = np.array([180, 80, 60], dtype=np.uint8)
 # ─────────────────────────────────────────────────────────────
 SHADOW_SAT_MAX    = 25   # near-zero S → grey background
 SHADOW_VAL_MAX    = 60   # AND dark → confirmed background
-REFLECTION_V_MIN  = 240  # very bright + low S → glare
-REFLECTION_S_MAX  = 22
+REFLECTION_V_MIN  = 220  # very bright + low S → glare (lowered from 240 to catch more reflections)
+REFLECTION_S_MAX  = 30   # increased from 22 to catch desaturated highlights
 
 # ─────────────────────────────────────────────────────────────
 #  STAGE 2 — BEAN GATE THRESHOLDS
@@ -942,12 +942,8 @@ class BeanDetector:
     # ─────────────────────────────────────────────────────────
     #  ANNOTATION  (draw on frame)
     # ─────────────────────────────────────────────────────────
-    _COLORS = {
-        Grade.GRADE_1: (0,   210, 100),   # green
-        Grade.GRADE_2: (50,  160, 255),   # blue
-        Grade.GRADE_3: (0,   200, 255),   # cyan
-        Grade.GRADE_4: (30,   50, 235),   # red
-    }
+    # One neutral BGR outline keeps the bean's physical color visible.
+    _ANNOTATION_COLOR = (55, 145, 85)
     _LABELS = {
         Grade.GRADE_1: "G1-PREMIUM",
         Grade.GRADE_2: "G2-GOOD",
@@ -961,42 +957,22 @@ class BeanDetector:
         bean: BeanResult,
         cx: float, cy: float, r_px: float,
     ) -> None:
-        color  = self._COLORS.get(bean.grade, (200, 200, 200))
+        color  = self._ANNOTATION_COLOR
         label  = self._LABELS.get(bean.grade, "?")
-        cx_i   = int(cx);  cy_i = int(cy);  r_i = int(r_px)
+        x, y = int(bean.bbox_x), int(bean.bbox_y)
+        right = x + int(bean.bbox_w)
+        bottom = y + int(bean.bbox_h)
 
-        # Circle
-        cv2.circle(img, (cx_i, cy_i), r_i, color, 2)
+        # Thin bounding box only; never fill or tint the detected bean region.
+        cv2.rectangle(img, (x, y), (right, bottom), color, 1, cv2.LINE_AA)
 
-        # Corner bracket overlay
-        half = r_i + 4
-        blen = max(8, r_i // 3)
-        pts  = [
-            ((cx_i - half, cy_i - half), (1, 0), (0, 1)),
-            ((cx_i + half, cy_i - half), (-1, 0), (0, 1)),
-            ((cx_i - half, cy_i + half), (1, 0), (0, -1)),
-            ((cx_i + half, cy_i + half), (-1, 0), (0, -1)),
-        ]
-        for (px, py), (dx, dy), (ex, ey) in pts:
-            cv2.line(img, (px, py), (px + dx*blen, py), color, 2)
-            cv2.line(img, (px, py), (px, py + ey*blen), color, 2)
-
-        # Grade label + confidence
+        # Small neutral grade label
         txt_conf = f"{label} {bean.confidence:.0f}%"
-        ty = cy_i - r_i - 8
-        if ty < 14:
-            ty = cy_i + r_i + 16
+        ty = max(14, y - 5)
         cv2.putText(
             img, txt_conf,
-            (cx_i - r_i, ty),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA,
-        )
-
-        # Size indicator
-        cv2.putText(
-            img, f"{bean.size_mm}mm",
-            (cx_i - r_i, ty + 14),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.38, color, 1, cv2.LINE_AA,
+            (x, ty),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv2.LINE_AA,
         )
 
     # ─────────────────────────────────────────────────────────

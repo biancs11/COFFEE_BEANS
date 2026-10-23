@@ -139,7 +139,7 @@ export default function CameraFeed({ frame, isRunning, lastBean }) {
             ].map((s, i) => (
               <div key={i} style={{
                 position: 'absolute', width: 22, height: 22,
-                borderColor: 'rgba(59,130,246,0.6)', ...s,
+                borderColor: 'rgba(55,145,85,0.65)', ...s,
               }} />
             ))}
 
@@ -158,7 +158,7 @@ export default function CameraFeed({ frame, isRunning, lastBean }) {
               background: 'rgba(0,0,0,0.55)',
               fontSize: '0.55rem', fontWeight: 600,
               padding: '2px 7px', borderRadius: 4, fontFamily: 'monospace',
-              color: useStream ? '#f59e0b' : '#3b82f6',
+              color: useStream ? '#f59e0b' : '#10b981',
             }}>
               {useStream ? 'MJPEG' : 'WS'}
             </div>

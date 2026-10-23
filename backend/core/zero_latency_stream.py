@@ -77,9 +77,8 @@ class ZeroLatencyFrameProducer:
         self.height = height
         self.fps = fps
         
-        # CRITICAL: LifoQueue (LIFO) not Queue (FIFO)
-        # Last frame in is first frame out = always newest
-        self.frame_queue = queue.LifoQueue(maxsize=1)
+        # Drop-oldest single slot: the queue contains only the newest capture.
+        self.frame_queue: queue.Queue = queue.Queue(maxsize=1)
         
         # Stats
         self._frame_id = 0
@@ -183,27 +182,33 @@ class ZeroLatencyFrameProducer:
                     metadata={"capture_time": now}
                 )
                 
-                # CRITICAL: LIFO queue - put new frame
-                # If queue full, old frame is automatically discarded (LIFO behavior)
-                try:
-                    self.frame_queue.put_nowait(frame)
-                except queue.Full:
-                    # Queue full - drop old frame, add new
-                    try:
-                        old = self.frame_queue.get_nowait()
-                        self._frames_dropped += 1
-                        if self._frames_dropped % 30 == 0:
-                            logger.debug(f"[Producer] Dropped {self._frames_dropped} frames (LIFO queue working)")
-                    except queue.Empty:
-                        pass
-                    # Add new frame (now queue has space)
-                    self.frame_queue.put_nowait(frame)
+                # Replace stale buffered data immediately; capture never waits on a consumer.
+                self._put_latest_frame(frame)
             
             except Exception as exc:
                 logger.error(f"Frame capture error: {exc}")
                 time.sleep(0.1)
         
         self._release_camera()
+
+    def _put_latest_frame(self, frame: StreamFrame) -> None:
+        """Insert the newest frame into the one-slot buffer without blocking."""
+        while True:
+            try:
+                self.frame_queue.put_nowait(frame)
+                return
+            except queue.Full:
+                try:
+                    self.frame_queue.get_nowait()
+                    self._frames_dropped += 1
+                    if self._frames_dropped % 30 == 0:
+                        logger.debug(
+                            "[Producer] Dropped %s stale frames (latest-frame buffer)",
+                            self._frames_dropped,
+                        )
+                except queue.Empty:
+                    # A consumer won the race and freed the slot.
+                    continue
     
     def _init_camera(self) -> None:
         """
@@ -299,6 +304,7 @@ class MJPEGStreamGenerator:
     
     def __init__(self, producer: ZeroLatencyFrameProducer):
         self.producer = producer
+        self._frame_queue: queue.Queue = queue.Queue(maxsize=1)
     
     def generate(self):
         """
@@ -316,6 +322,22 @@ class MJPEGStreamGenerator:
             if frame is None:
                 # No frame available - yield empty to keep connection alive
                 time.sleep(0.01)
+                continue
+
+            # Keep this stream's pending work bounded too. If a client is slow,
+            # the producer buffer already advances and this slot is replaced.
+            while True:
+                try:
+                    self._frame_queue.put_nowait(frame)
+                    break
+                except queue.Full:
+                    try:
+                        self._frame_queue.get_nowait()
+                    except queue.Empty:
+                        continue
+            try:
+                frame = self._frame_queue.get_nowait()
+            except queue.Empty:
                 continue
             
             # Encode BGR frame as JPEG (cv2.imencode handles BGR→RGB internally)
