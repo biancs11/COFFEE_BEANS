@@ -1,45 +1,46 @@
-# ============================================================
-# Coffee Bean Sorting System — Python Dependencies
-# All versions pinned for reproducible production deployments.
-# Install: pip install -r requirements.txt
-# ============================================================
+# Coffee Bean Sorting System - Python dependencies
+# Use version ranges so pip can choose wheels compatible with the Pi's CPU
+# architecture and Python version (including newer Raspberry Pi OS releases).
+#
+# Raspberry Pi OS setup:
+#   sudo apt install python3-venv python3-picamera2
+#   python3 -m venv --system-site-packages .venv
+#   source .venv/bin/activate
+#   python -m pip install -r backend/requirements.txt
+#
+# Picamera2 is supplied by Raspberry Pi OS, not pip. The venv needs
+# --system-site-packages to see the apt-installed camera packages.
 
-# ── Web framework ─────────────────────────────────────────────
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
-gunicorn==22.0.0
-python-multipart==0.0.9
-starlette==0.37.2
+# Web framework
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
+gunicorn>=23,<24
+python-multipart>=0.0.20,<1
 
-# ── Data validation ───────────────────────────────────────────
-pydantic==2.7.1
-pydantic-settings==2.3.1
+# Data validation and configuration
+pydantic>=2.10,<3
+pydantic-settings>=2.7,<3
+python-dotenv>=1,<2
 
-# ── Environment / config ──────────────────────────────────────
-python-dotenv==1.0.1
+# Computer vision and image processing
+opencv-python-headless>=4.10,<5
+numpy>=2.1,<3
+scikit-learn>=1.6,<2
+Pillow>=10.3,<13
 
-# ── Computer vision ───────────────────────────────────────────
-opencv-python-headless==4.9.0.80
-numpy==1.26.4
+# WebSocket support
+websockets>=14,<16
 
-# ── Machine learning / image processing ───────────────────────
-# Used by the bean detector's appearance-based grading pipeline.
-# scikit-learn: nearest-centroid classification + feature scaling
-# Pillow: image I/O for training sample saving / thumbnail preview
-scikit-learn==1.4.2
-Pillow==10.3.0
+# Database
+sqlalchemy>=2,<3
+alembic>=1.13,<2
 
-# ── WebSocket ─────────────────────────────────────────────────
-websockets==12.0
+# System monitoring
+psutil>=5.9.8,<8
 
-# ── Database ──────────────────────────────────────────────────
-sqlalchemy==2.0.30
-alembic==1.13.1
+# Optional hardware package for the I2C pressure sensor
+smbus2>=0.4.3,<1
 
-# ── System monitoring ─────────────────────────────────────────
-psutil==5.9.8
-
-# ── Raspberry Pi hardware (install manually — not on all archs)
-# sudo apt install python3-picamera2 libcamera-apps
-# pip install RPi.GPIO==0.7.1
-# pip install smbus2==0.4.3
+# GPIO is installed through Raspberry Pi OS packages, not pip.
+# For GPIO hardware support, install the OS package if available:
+#   sudo apt install python3-rpi.gpio
