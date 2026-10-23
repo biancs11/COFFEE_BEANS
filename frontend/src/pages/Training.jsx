@@ -557,8 +557,8 @@ export default function Training({ onToast }) {
             {
               step: '1',
               icon: '🌅',
-              title: 'Lighting Normalisation',
-              body:  'Gray-world white balance is applied to every frame so colour readings stay stable under different lighting temperatures and intensities.',
+              title: 'Raw Colour Measurement',
+              body:  'Frames are measured as captured, without software white-balance correction. Keep the lighting consistent for comparable colour readings.',
             },
             {
               step: '2',

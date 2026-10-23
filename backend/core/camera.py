@@ -280,7 +280,7 @@ class CameraManager:
 
                 # Auto-exposure with highlight protection (anti-glare)
                 "AeEnable":            True,
-                "AwbEnable":           True,
+                "AwbEnable":           False, # Preserve captured colors without auto white balance
                 "AeConstraintMode":    1,    # 1 = Highlight (prevent overexposure)
                 "ExposureValue":       -0.5, # Slight underexposure for overhead lights
                 

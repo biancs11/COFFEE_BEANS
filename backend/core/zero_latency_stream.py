@@ -218,7 +218,7 @@ class ZeroLatencyFrameProducer:
         1. RGB888 format (NOT BGR or YUV)
         2. 640x480@30fps (optimized for Pi 5)
         3. Continuous fast autofocus
-        4. Auto white balance
+        4. Fixed camera color (auto white balance disabled)
         5. Anti-glare exposure (-0.5 EV)
         6. Single buffer (minimum latency)
         """
@@ -246,9 +246,8 @@ class ZeroLatencyFrameProducer:
                 "AfMode": controls.AfModeEnum.Continuous,
                 "AfSpeed": controls.AfSpeedEnum.Fast,
                 
-                # CRITICAL: Auto white balance
-                "AwbEnable": True,
-                "AwbMode": controls.AwbModeEnum.Auto,
+                # Preserve captured colors without auto white balance.
+                "AwbEnable": False,
                 
                 # Image quality
                 "NoiseReductionMode": controls.draft.NoiseReductionModeEnum.Fast,

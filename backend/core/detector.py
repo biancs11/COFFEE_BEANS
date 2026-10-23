@@ -7,8 +7,8 @@ Architecture (5 stages, executed per contour):
   Stage 2 — Bean gate          : shape geometry (circularity, solidity, aspect,
                                   size) + texture coherence via Laplacian variance
                                   → rejects pebbles, husks, dust, hands, etc.
-  Stage 3 — Lighting normalise : per-frame gray-world white balance so HSV
-                                  values stay stable across illumination shifts
+  Stage 3 — Colour features      : measure the captured frame without
+                                  per-frame white-balance correction
   Stage 4 — Feature extraction : mean/std of H,S,V + 8-bin hue histogram
                                   + surface texture (Laplacian std) + shape moments
   Stage 5 — Grading            : if a trained profile is loaded, uses
@@ -349,7 +349,7 @@ class BeanDetector:
         if frame is None or frame.size == 0:
             return False
         try:
-            norm    = self._gray_world_balance(frame)
+            norm    = frame
             blurred = cv2.resize(norm, (norm.shape[1]//2, norm.shape[0]//2))  # half-res is enough
             hsv     = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
             mask    = cv2.inRange(hsv, DETECT_LOWER, DETECT_UPPER)
@@ -444,8 +444,8 @@ class BeanDetector:
         annotated = frame.copy()
         beans: list[BeanResult] = []
 
-        # ── Stage 1a: Lighting normalisation (gray-world white balance) ──
-        norm_frame = self._gray_world_balance(frame)
+        # Use the captured frame as-is; do not apply per-frame color correction.
+        norm_frame = frame
 
         # ── Stage 1b: Pre-process for mask building ───────────────────
         blurred  = cv2.bilateralFilter(norm_frame, d=5, sigmaColor=50, sigmaSpace=50)  # d=5 is 2x faster than d=9 at 1080p
@@ -579,50 +579,6 @@ class BeanDetector:
             )
 
         return beans, annotated
-
-    # ─────────────────────────────────────────────────────────
-    #  LIGHTING NORMALISATION  (gray-world white balance)
-    #  Divides each channel by its mean and rescales so the
-    #  overall mean equals 128 — makes HSV stable under
-    #  different lighting temperatures / intensities.
-    # ─────────────────────────────────────────────────────────
-    @staticmethod
-    def _gray_world_balance(frame: np.ndarray) -> np.ndarray:
-        """
-        Conservative gray-world white balance.
-        Only applies correction when channel imbalance is significant
-        AND within a reasonable range — prevents blue/gold artifacts
-        on dark conveyor backgrounds.
-        """
-        try:
-            b, g, r = cv2.split(frame.astype(np.float32))
-            bm = float(b.mean())
-            gm = float(g.mean())
-            rm = float(r.mean())
-
-            # Skip correction if image is very dark (conveyor belt, no beans)
-            # or if channels are already balanced enough
-            avg = (bm + gm + rm) / 3.0
-            if avg < 20:
-                return frame  # too dark — correction would amplify noise
-
-            # Only correct if imbalance exceeds 15% — avoid over-correcting
-            max_ch = max(bm, gm, rm)
-            min_ch = min(bm, gm, rm)
-            if max_ch < 1 or (max_ch - min_ch) / max_ch < 0.15:
-                return frame  # channels already balanced
-
-            # Cap correction factor to avoid extreme shifts (max 1.5x per channel)
-            def safe_scale(ch, cm):
-                factor = min(avg / max(cm, 1), 1.5)
-                return np.clip(ch * factor, 0, 255)
-
-            b = safe_scale(b, bm)
-            g = safe_scale(g, gm)
-            r = safe_scale(r, rm)
-            return cv2.merge([b, g, r]).astype(np.uint8)
-        except Exception:
-            return frame
 
     # ─────────────────────────────────────────────────────────
     #  STAGE 2 — BEAN GATE

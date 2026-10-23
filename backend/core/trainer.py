@@ -69,22 +69,6 @@ _FEATURE_DIM = 16
 #  FEATURE EXTRACTION  (shared with detector — same 16 dims)
 # ═════════════════════════════════════════════════════════════
 
-def _gray_world(frame: np.ndarray) -> np.ndarray:
-    """Gray-world white balance — same as detector._gray_world_balance."""
-    try:
-        b, g, r = cv2.split(frame.astype(np.float32))
-        bm = float(b.mean()) or 1.0
-        gm = float(g.mean()) or 1.0
-        rm = float(r.mean()) or 1.0
-        k  = (bm + gm + rm) / 3.0
-        b  = np.clip(b * (k / bm), 0, 255)
-        g  = np.clip(g * (k / gm), 0, 255)
-        r  = np.clip(r * (k / rm), 0, 255)
-        return cv2.merge([b, g, r]).astype(np.uint8)
-    except Exception:
-        return frame
-
-
 def _feature_from_roi(
     roi_hsv: np.ndarray,
     roi_bgr: np.ndarray,
@@ -144,7 +128,7 @@ def _detect_blobs(frame: np.ndarray) -> list[tuple[np.ndarray, tuple, np.ndarray
     Detect bean-like blobs in a training image.
     Returns list of (contour, (x,y,w,h), roi_mask).
     """
-    norm    = _gray_world(frame)
+    norm    = frame
     blurred = cv2.bilateralFilter(norm, d=9, sigmaColor=60, sigmaSpace=60)
     hsv     = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
 
@@ -224,7 +208,7 @@ def extract_features_from_image(
         scale = 1600 / max(h, w)
         img   = cv2.resize(img, (int(w * scale), int(h * scale)))
 
-    norm   = _gray_world(img)
+    norm   = img
     hsv    = cv2.cvtColor(norm, cv2.COLOR_BGR2HSV)
     blobs  = _detect_blobs(img)
 
